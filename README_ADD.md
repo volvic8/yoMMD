@@ -47,9 +47,9 @@ cd .\release
 
 ```toml
 model = "../input/model/HakosBaelz/HakosBaelz/PMX/HakosBaelz.pmx"
-default-model-position = [0.88, -0.92]
+default-model-position = [0.90, -0.80]
 default-camera-position = [0.0, 20.0, 50.0]
-default-scale = 0.25
+default-scale = 0.38
 
 [[motion]]
 path = ["../input/motion/Running.vmd"]
