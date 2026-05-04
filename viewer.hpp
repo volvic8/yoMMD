@@ -91,6 +91,11 @@ public:
     struct Callback {
         std::function<void()> OnRotationChanged;
     };
+    struct State {
+        float rotation = 0.0f;
+        float scale = 1.0f;
+        glm::vec2 translation = glm::vec2(0.0f, 0.0f);
+    };
 
 public:
     void SetCallback(const Callback& callback);
@@ -113,6 +118,8 @@ public:
     float GetScale() const;
     float GetRotation() const;
     glm::vec2 GetTranslation() const;
+    State GetState() const;
+    void RestoreState(const State& state);
 
 private:
     static bool isDifferentPoint(const glm::vec2& p1, const glm::vec2& p2);

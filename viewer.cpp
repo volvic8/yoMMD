@@ -378,6 +378,24 @@ glm::vec2 UserView::GetTranslation() const {
     return glm::vec2(transform_.translation.x, transform_.translation.y);
 }
 
+UserView::State UserView::GetState() const {
+    return State{
+        .rotation = transform_.rotation,
+        .scale = transform_.scale,
+        .translation = GetTranslation(),
+    };
+}
+
+void UserView::RestoreState(const State& state) {
+    const bool rotationChanged = transform_.rotation != state.rotation;
+    transform_.rotation = state.rotation;
+    transform_.scale = state.scale;
+    transform_.translation = toVec3(state.translation, 0.0f);
+    actionHelper_.action = Action::None;
+    if (rotationChanged && callback_.OnRotationChanged)
+        callback_.OnRotationChanged();
+}
+
 void UserView::changeScale(float newScale, glm::vec2 refpoint) {
     if (actionHelper_.action != Action::Zoom ||
         isDifferentPoint(actionHelper_.refPoint, refpoint)) {
@@ -1037,7 +1055,6 @@ void Routine::ResetModelPosition() {
 void Routine::ChangeModel(const std::filesystem::path& modelPath) {
     Config nextConfig = config_;
     nextConfig.model = modelPath;
-    nextConfig.motions.clear();
     reloadScene(nextConfig);
 }
 
@@ -1081,9 +1098,11 @@ glm::vec4 Routine::GetModelInteractionBounds(const glm::vec2& windowSize) const 
 }
 
 void Routine::reloadScene(const Config& config) {
+    const auto viewState = userView_.GetState();
     destroyScene();
     config_ = config;
     initScene();
+    userView_.RestoreState(viewState);
 }
 
 void Routine::ParseConfig(const CmdArgs& args) {

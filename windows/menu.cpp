@@ -153,7 +153,7 @@ void AppMenu::ShowMenu() {
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
     int height = 286;
     if (hasMultiScreen) {
-        height += btnH + gap;
+        height += rowH + 2 + btnH + gap;
     }
 
     RECT mainRect = {};
@@ -234,7 +234,7 @@ void AppMenu::ShowMenu() {
         margin, y, width - margin * 2, btnH, Enum::underlyCast(Cmd::EnableMouse));
     y += btnH + gap;
 
-    makeStatic(L"Model", margin, y, width - margin * 2, rowH, SS_LEFT);
+    makeStatic(L"Change Model", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
     makeStatic(
         toDisplayName(config.model, 44), margin, y, width - margin * 2, valueH,
@@ -253,7 +253,7 @@ void AppMenu::ShowMenu() {
     if (!config.motions.empty() && !config.motions.front().paths.empty()) {
         motionName = toDisplayName(config.motions.front().paths.front(), 44);
     }
-    makeStatic(L"Motion", margin, y, width - margin * 2, rowH, SS_LEFT);
+    makeStatic(L"Change Motion", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
     makeStatic(motionName, margin, y, width - margin * 2, valueH, SS_LEFT | SS_PATHELLIPSIS);
     y += valueH + 4;
@@ -266,7 +266,7 @@ void AppMenu::ShowMenu() {
         Enum::underlyCast(Cmd::NextMotion));
     y += btnH + gap;
 
-    makeStatic(L"View", margin, y, width - margin * 2, rowH, SS_LEFT);
+    makeStatic(L"View Direction", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
     makeButton(L"Front", margin, y, midBtnW, btnH, Cmd::Combine(Cmd::SetViewDirection, 0));
     makeButton(
@@ -285,6 +285,8 @@ void AppMenu::ShowMenu() {
     y += btnH + gap;
 
     if (hasMultiScreen) {
+        makeStatic(L"Select screen", margin, y, width - margin * 2, rowH, SS_LEFT);
+        y += rowH + 2;
         makeButton(L"Screen 0", margin, y, 110, btnH, Cmd::Combine(Cmd::SelectScreen, 0));
         makeButton(
             L"Screen 1", margin + 110 + gap, y, 110, btnH,
