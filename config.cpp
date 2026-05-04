@@ -20,7 +20,7 @@ Config::Config() :
     simulationFPS(60.0f),
     gravity(9.8f),
     lightDirection(-0.5f, -1.0f, -0.5f),
-    defaultModelPosition(0.90f, -0.80f),
+    defaultModelPosition(0.90f, -0.74f),
     defaultScale(0.38f),
     defaultCameraPosition(0, 10, 50),
     defaultGazePosition(0, 10, 0),

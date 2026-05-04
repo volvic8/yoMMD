@@ -27,6 +27,13 @@ std::wstring toDisplayName(const std::filesystem::path& path, size_t maxLength =
     return name.substr(0, maxLength - 3) + L"...";
 }
 
+std::wstring makeButtonLabel(
+    std::wstring_view prefix,
+    const std::filesystem::path& path,
+    size_t maxLength) {
+    return std::wstring(prefix) + L": " + toDisplayName(path, maxLength);
+}
+
 void applyMenuFont(HWND hwnd, HFONT font) {
     if (hwnd && font) {
         SendMessageW(hwnd, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -140,18 +147,16 @@ void AppMenu::ShowMenu() {
     const RECT buttonRect = getAppMain().GetMenuButtonRect();
     const auto& config = getAppMain().GetRoutine().GetConfig();
 
-    constexpr int width = 340;
+    constexpr int width = 360;
     constexpr int margin = 14;
     constexpr int rowH = 18;
-    constexpr int valueH = 24;
     constexpr int btnH = 28;
     constexpr int gap = 8;
     constexpr int smallBtnW = 42;
-    constexpr int midBtnW = 72;
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 286;
+    int height = 380;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -229,21 +234,13 @@ void AppMenu::ShowMenu() {
     makeStatic(L"Quick controls", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + gap;
 
-    makeButton(
-        getAppMain().IsMouseInteractionEnabled() ? L"Disable Mouse" : L"Enable Mouse",
-        margin, y, width - margin * 2, btnH, Enum::underlyCast(Cmd::EnableMouse));
-    y += btnH + gap;
-
     makeStatic(L"Change Model", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
-    makeStatic(
-        toDisplayName(config.model, 44), margin, y, width - margin * 2, valueH,
-        SS_LEFT | SS_PATHELLIPSIS);
-    y += valueH + 4;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevModel));
     makeButton(
-        L"Choose...", margin + smallBtnW + gap, y, width - margin * 2 - smallBtnW * 2 - gap * 2,
-        btnH, Enum::underlyCast(Cmd::ChangeModel));
+        makeButtonLabel(L"Model", config.model, 28), margin + smallBtnW + gap, y,
+        width - margin * 2 - smallBtnW * 2 - gap * 2, btnH,
+        Enum::underlyCast(Cmd::ChangeModel));
     makeButton(
         L">", width - margin - smallBtnW, y, smallBtnW, btnH,
         Enum::underlyCast(Cmd::NextModel));
@@ -251,33 +248,20 @@ void AppMenu::ShowMenu() {
 
     std::wstring motionName = L"(no motion)";
     if (!config.motions.empty() && !config.motions.front().paths.empty()) {
-        motionName = toDisplayName(config.motions.front().paths.front(), 44);
+        motionName = makeButtonLabel(L"Motion", config.motions.front().paths.front(), 27);
+    } else {
+        motionName = L"Motion: (no motion)";
     }
     makeStatic(L"Change Motion", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
-    makeStatic(motionName, margin, y, width - margin * 2, valueH, SS_LEFT | SS_PATHELLIPSIS);
-    y += valueH + 4;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevMotion));
     makeButton(
-        L"Choose...", margin + smallBtnW + gap, y, width - margin * 2 - smallBtnW * 2 - gap * 2,
-        btnH, Enum::underlyCast(Cmd::ChangeMotion));
+        motionName, margin + smallBtnW + gap, y, width - margin * 2 - smallBtnW * 2 - gap * 2,
+        btnH,
+        Enum::underlyCast(Cmd::ChangeMotion));
     makeButton(
         L">", width - margin - smallBtnW, y, smallBtnW, btnH,
         Enum::underlyCast(Cmd::NextMotion));
-    y += btnH + gap;
-
-    makeStatic(L"View Direction", margin, y, width - margin * 2, rowH, SS_LEFT);
-    y += rowH + 2;
-    makeButton(L"Front", margin, y, midBtnW, btnH, Cmd::Combine(Cmd::SetViewDirection, 0));
-    makeButton(
-        L"Right", margin + midBtnW + gap, y, midBtnW, btnH,
-        Cmd::Combine(Cmd::SetViewDirection, 1));
-    makeButton(
-        L"Back", margin + (midBtnW + gap) * 2, y, midBtnW, btnH,
-        Cmd::Combine(Cmd::SetViewDirection, 2));
-    makeButton(
-        L"Left", width - margin - midBtnW, y, midBtnW, btnH,
-        Cmd::Combine(Cmd::SetViewDirection, 3));
     y += btnH + gap;
     makeButton(
         L"Reset Position", margin, y, width - margin * 2, btnH,
@@ -317,8 +301,6 @@ void AppMenu::ShowTaskbarMenu() {
         Err::Log("Failed to get mouse point");
         return;
     }
-
-    const LONG parentWinExStyle = GetWindowLongW(parentWin, GWL_EXSTYLE);
 
     UniqueHWND menuWindow(CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wcMenuName, L"", WS_POPUP, 0, 0, 0,
@@ -374,9 +356,6 @@ void AppMenu::ShowTaskbarMenu() {
 
     UniqueHMENU menu(CreatePopupMenu());
     AppendMenuW(
-        menu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse),
-        getAppMain().IsMouseInteractionEnabled() ? L"&Disable Mouse" : L"&Enable Mouse");
-    AppendMenuW(
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(modelsMenu.GetRawHandler()), L"Change &Model");
     AppendMenuW(
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(motionsMenu.GetRawHandler()),
@@ -395,9 +374,6 @@ void AppMenu::ShowTaskbarMenu() {
     AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::Quit), L"&Quit");
 
-    if (parentWinExStyle == 0) {
-        EnableMenuItem(menu, Enum::underlyCast(Cmd::EnableMouse), MF_DISABLED);
-    }
     if (monitorHandles.size() <= 1) {
         EnableMenuItem(menu, reinterpret_cast<UINT_PTR>(screensMenu.GetRawHandler()), MF_DISABLED);
     }
@@ -414,7 +390,16 @@ bool AppMenu::IsMenuOpened() const {
     return isMenuOpened_;
 }
 
-void AppMenu::handleCommand(UINT_PTR op) {
+void AppMenu::handleCommand(UINT_PTR op, HWND sourceHwnd) {
+    const auto cmd = Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op));
+    if (cmd == Cmd::ChangeModel) {
+        showSelectionMenu(sourceHwnd, true);
+        return;
+    }
+    if (cmd == Cmd::ChangeMotion) {
+        showSelectionMenu(sourceHwnd, false);
+        return;
+    }
     executeCommand(op, true);
 }
 
@@ -424,7 +409,6 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
 
     switch (Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op))) {
     case Cmd::EnableMouse:
-        getAppMain().SetMouseInteractionEnabled(!getAppMain().IsMouseInteractionEnabled());
         break;
     case Cmd::ChangeModel:
         PostMessageW(parentWin, YOMMD_WM_OPEN_MODEL_DIALOG, 0, 0);
@@ -501,6 +485,37 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     }
 }
 
+void AppMenu::showSelectionMenu(HWND sourceHwnd, bool isModelSelection) {
+    if (!sourceHwnd)
+        return;
+
+    const auto& paths =
+        isModelSelection ? getAppMain().GetAvailableModels() : getAppMain().GetAvailableMotions();
+    if (paths.empty())
+        return;
+
+    RECT buttonRect = {};
+    if (!GetWindowRect(sourceHwnd, &buttonRect))
+        return;
+
+    UniqueHMENU menu(CreatePopupMenu());
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const auto label = toDisplayName(paths[i], 48);
+        const auto kind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
+        AppendMenuW(
+            menu, MF_STRING,
+            Cmd::Combine(kind, static_cast<Cmd::UnderlyingType>(i)), label.c_str());
+    }
+
+    SetForegroundWindow(hMenuWindow_);
+    const auto op = TrackPopupMenuEx(
+        menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY, buttonRect.left,
+        buttonRect.bottom + 2, hMenuWindow_, nullptr);
+    if (op != 0) {
+        executeCommand(op, true);
+    }
+}
+
 LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     AppMenu *menu = reinterpret_cast<AppMenu *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (uMsg == WM_NCCREATE) {
@@ -531,7 +546,7 @@ LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         break;
     case WM_COMMAND:
         if (menu) {
-            menu->handleCommand(static_cast<UINT_PTR>(LOWORD(wParam)));
+            menu->handleCommand(static_cast<UINT_PTR>(LOWORD(wParam)), reinterpret_cast<HWND>(lParam));
             return 0;
         }
         break;

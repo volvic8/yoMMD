@@ -29,8 +29,9 @@ public:
 private:
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void destroyMenuWindow();
-    void handleCommand(UINT_PTR cmd);
+    void handleCommand(UINT_PTR cmd, HWND sourceHwnd);
     void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
+    void showSelectionMenu(HWND sourceHwnd, bool isModelSelection);
 
     void createTaskbar();
 

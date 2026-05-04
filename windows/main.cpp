@@ -739,6 +739,8 @@ void AppMain::refreshInputFileLists() {
 
 std::optional<std::filesystem::path> AppMain::selectModelFile() const {
     std::array<wchar_t, 32768> fileBuffer = {};
+    const auto initialDir =
+        Path::makeAbsolute("input/model", Path::getWorkingDirectory()).wstring();
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd_;
@@ -747,6 +749,7 @@ std::optional<std::filesystem::path> AppMain::selectModelFile() const {
         L"(*.pmd)\0*.pmd\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = fileBuffer.data();
     ofn.nMaxFile = static_cast<DWORD>(fileBuffer.size());
+    ofn.lpstrInitialDir = initialDir.c_str();
     ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
 
     if (!GetOpenFileNameW(&ofn))
@@ -756,12 +759,15 @@ std::optional<std::filesystem::path> AppMain::selectModelFile() const {
 
 std::vector<std::filesystem::path> AppMain::selectMotionFiles() const {
     std::array<wchar_t, 32768> fileBuffer = {};
+    const auto initialDir =
+        Path::makeAbsolute("input/motion", Path::getWorkingDirectory()).wstring();
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd_;
     ofn.lpstrFilter = L"VMD Motion (*.vmd)\0*.vmd\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = fileBuffer.data();
     ofn.nMaxFile = static_cast<DWORD>(fileBuffer.size());
+    ofn.lpstrInitialDir = initialDir.c_str();
     ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
                 OFN_ALLOWMULTISELECT;
 
