@@ -34,6 +34,7 @@ public:
     bool IsMouseInteractionEnabled() const;
     Routine& GetRoutine();
     const HWND& GetWindowHandle() const;
+    RECT GetMenuButtonRect() const;
     const std::vector<std::filesystem::path>& GetAvailableModels() const;
     const std::vector<std::filesystem::path>& GetAvailableMotions() const;
     sg_environment GetSokolEnvironment() const;

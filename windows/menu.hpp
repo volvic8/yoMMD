@@ -26,8 +26,9 @@ public:
     static constexpr UINT YOMMD_WM_SET_VIEW_DIRECTION = WM_APP + 6;
 
 private:
-    static DWORD WINAPI showMenu(LPVOID param);
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+    void destroyMenuWindow();
+    void handleCommand(UINT_PTR cmd);
 
     void createTaskbar();
 
@@ -56,6 +57,10 @@ private:
             EnableMouse,
             ChangeModel,
             ChangeMotion,
+            PrevModel,
+            NextModel,
+            PrevMotion,
+            NextMotion,
             SelectModel,
             SelectMotion,
             SetViewDirection,
@@ -80,10 +85,10 @@ private:
     };
 
     static constexpr PCWSTR wcMenuName = L"yoMMD-menu-window";
-    static constexpr PCWSTR wcSelectorName = L"yoMMD-screen-selector-window";
 
-    HANDLE hMenuThread_;
+    HWND hMenuWindow_;
     HICON hTaskbarIcon_;
+    HFONT hMenuFont_;
     NOTIFYICONDATAW taskbarIconDesc_;
     bool isMenuOpened_;
 };

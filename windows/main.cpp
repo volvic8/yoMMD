@@ -155,6 +155,14 @@ const HWND& AppMain::GetWindowHandle() const {
     return hwnd_;
 }
 
+RECT AppMain::GetMenuButtonRect() const {
+    RECT rect = {};
+    if (menuButtonHwnd_) {
+        GetWindowRect(menuButtonHwnd_, &rect);
+    }
+    return rect;
+}
+
 const std::vector<std::filesystem::path>& AppMain::GetAvailableModels() const {
     return availableModels_;
 }
