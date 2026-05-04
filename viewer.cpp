@@ -327,7 +327,7 @@ void UserView::OnWheelScrolled(float delta) {
             callback_.OnRotationChanged();
     } else {
         changeScale(
-            transform_.scale - delta / Context::getWindowSize().y,
+            transform_.scale + delta / Context::getWindowSize().y,
             Context::getMousePosition());
     }
 }
@@ -1064,13 +1064,8 @@ void Routine::SetModelScale(float scale) {
 }
 
 glm::vec2 Routine::GetModelMenuAnchorPosition(const glm::vec2& windowSize) const {
-    const auto translation = userView_.GetTranslation();
-    const auto scale = userView_.GetScale();
-    glm::vec2 center = (translation + glm::vec2(1.0f, 1.0f)) * windowSize / 2.0f;
-
-    // Approximate the point slightly above the model's head from its center and scale.
-    center.y += windowSize.y * 0.58f * scale;
-    return center;
+    const auto bounds = GetModelInteractionBounds(windowSize);
+    return glm::vec2((bounds.x + bounds.z) / 2.0f, bounds.w + 18.0f);
 }
 
 glm::vec4 Routine::GetModelInteractionBounds(const glm::vec2& windowSize) const {

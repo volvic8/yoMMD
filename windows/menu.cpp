@@ -91,7 +91,7 @@ bool AppMenu::IsMenuOpened() const {
 
 DWORD WINAPI AppMenu::showMenu(LPVOID param) {
     AppMenu *appMenu = reinterpret_cast<AppMenu *>(param);
-    constexpr DWORD winStyle = WS_CHILD;
+    constexpr DWORD winStyle = WS_POPUP;
     const HWND& parentWin = getAppMain().GetWindowHandle();
     UniqueHWND hMenuWindow, hSelectorWindow;
 
@@ -113,7 +113,8 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
         hSelectorWindow, DWMWA_TRANSITIONS_FORCEDISABLED, &fDisable, sizeof(fDisable));
 
     hMenuWindow = CreateWindowExW(
-        0, wcMenuName, L"", winStyle, 0, 0, 0, 0, parentWin, nullptr,
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wcMenuName, L"", winStyle, 0, 0, 0,
+        0, parentWin, nullptr,
         GetModuleHandleW(nullptr), hSelectorWindow);
     if (!hMenuWindow.GetRawHandler()) {
         Err::Log("Failed to create dummy window for menu.");
@@ -211,6 +212,10 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
 
     constexpr UINT menuFlags = TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD;
 
+    SetWindowPos(parentWin, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(
+        hMenuWindow.GetRawHandler(), HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetForegroundWindow(hMenuWindow);
     appMenu->isMenuOpened_ = true;
     const auto op = TrackPopupMenuEx(hmenu, menuFlags, point.x, point.y, hMenuWindow, nullptr);
