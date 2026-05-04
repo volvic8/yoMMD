@@ -1,5 +1,8 @@
 #include "main.hpp"
+#include <array>
+#include <algorithm>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -13,8 +16,70 @@
 #include "msgbox.hpp"
 #include "sokol_time.h"
 
+namespace {
+std::vector<std::filesystem::path> parseDialogPaths(const wchar_t *buffer) {
+    std::vector<std::filesystem::path> paths;
+    if (!buffer || !*buffer)
+        return paths;
+
+    const std::wstring directory(buffer);
+    const wchar_t *next = buffer + directory.size() + 1;
+    if (!*next) {
+        paths.emplace_back(directory);
+        return paths;
+    }
+
+    while (*next) {
+        paths.emplace_back(std::filesystem::path(directory) / next);
+        next += std::wcslen(next) + 1;
+    }
+    return paths;
+}
+
+LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_NCCREATE) {
+        const CREATESTRUCTW *cs = reinterpret_cast<const CREATESTRUCTW *>(lParam);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+        return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+    }
+
+    const HWND owner = reinterpret_cast<HWND>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    switch (uMsg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps = {};
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rect = {};
+        GetClientRect(hwnd, &rect);
+        FillRect(hdc, &rect, reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1));
+
+        const HICON icon =
+            reinterpret_cast<HICON>(SendMessageW(hwnd, WM_GETICON, ICON_SMALL, 0));
+        if (icon) {
+            constexpr int iconSize = 20;
+            const int x = (rect.right - rect.left - iconSize) / 2;
+            const int y = (rect.bottom - rect.top - iconSize) / 2;
+            DrawIconEx(hdc, x, y, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        }
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+        if (owner) {
+            PostMessageW(owner, AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU, 0, WM_RBUTTONDOWN);
+        }
+        return 0;
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+}  // namespace
+
 AppMain::AppMain() :
-    isRunning_(true), sampleCount_(Constant::PreferredSampleCount), hwnd_(nullptr) {}
+    isRunning_(true),
+    sampleCount_(Constant::PreferredSampleCount),
+    hwnd_(nullptr),
+    menuButtonHwnd_(nullptr),
+    menuButtonIcon_(nullptr) {}
 
 AppMain::~AppMain() {
     Terminate();
@@ -22,7 +87,9 @@ AppMain::~AppMain() {
 
 void AppMain::Setup(const CmdArgs& cmdArgs) {
     routine_.ParseConfig(cmdArgs);
+    refreshInputFileLists();
     createWindow();
+    createMenuButtonWindow();
     createDrawable();
     menu_.Setup();
     routine_.Init();
@@ -34,15 +101,18 @@ void AppMain::Setup(const CmdArgs& cmdArgs) {
 void AppMain::UpdateDisplay() {
     routine_.Update();
     routine_.Draw();
+    repositionMenuButtonWindow();
     swapChain_->Present(1, 0);
     dcompDevice_->Commit();
 }
 
 void AppMain::Terminate() {
     routine_.Terminate();
+    destroyMenuButtonWindow();
     DestroyWindow(hwnd_);
     hwnd_ = nullptr;
     UnregisterClassW(windowClassName_, GetModuleHandleW(nullptr));
+    UnregisterClassW(menuButtonClassName_, GetModuleHandleW(nullptr));
     menu_.Terminate();
 }
 
@@ -60,6 +130,7 @@ void AppMain::ChangeScreen(int screenID) {
     const auto cy = r->bottom - r->top;
     constexpr UINT uFlags = SWP_SHOWWINDOW | SWP_NOACTIVATE;
     SetWindowPos(hwnd_, HWND_TOPMOST, r->left, r->top, cx, cy, uFlags);
+    repositionMenuButtonWindow();
 }
 
 Routine& AppMain::GetRoutine() {
@@ -67,6 +138,14 @@ Routine& AppMain::GetRoutine() {
 }
 const HWND& AppMain::GetWindowHandle() const {
     return hwnd_;
+}
+
+const std::vector<std::filesystem::path>& AppMain::GetAvailableModels() const {
+    return availableModels_;
+}
+
+const std::vector<std::filesystem::path>& AppMain::GetAvailableMotions() const {
+    return availableMotions_;
 }
 
 sg_environment AppMain::GetSokolEnvironment() const {
@@ -142,6 +221,8 @@ void AppMain::createWindow() {
     int targetScreenNumber = 0;  // The main monitor ID should be 0.
     if (config.defaultScreenNumber.has_value()) {
         targetScreenNumber = *config.defaultScreenNumber;
+    } else if (getAllMonitorHandles().size() > 1) {
+        targetScreenNumber = 1;
     }
 
     RECT rect = {};
@@ -178,6 +259,80 @@ void AppMain::createWindow() {
 
     // Don't call ShowWindow() here.  Postpone showing window until
     // MMD model setup finished.
+}
+
+void AppMain::createMenuButtonWindow() {
+    constexpr int iconSize = 28;
+
+    WNDCLASSEXW wc = {};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = menuButtonWindowProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = menuButtonClassName_;
+    wc.hCursor = LoadCursor(nullptr, IDC_HAND);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    RegisterClassExW(&wc);
+
+    const auto iconData = Resource::getStatusIconData();
+    menuButtonIcon_ = CreateIconFromResource(
+        const_cast<PBYTE>(iconData.data()), iconData.length(), TRUE, 0x00030000);
+    if (!menuButtonIcon_) {
+        menuButtonIcon_ = LoadIconW(GetModuleHandleW(nullptr), L"YOMMD_APPICON_ID");
+    }
+
+    menuButtonHwnd_ = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, menuButtonClassName_,
+        L"yoMMD Menu Button", WS_POPUP | WS_VISIBLE, 0, 0, iconSize, iconSize, hwnd_, nullptr,
+        GetModuleHandleW(nullptr), hwnd_);
+    if (!menuButtonHwnd_) {
+        Err::Log("Failed to create menu button window.");
+        return;
+    }
+
+    if (menuButtonIcon_) {
+        SendMessageW(menuButtonHwnd_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(menuButtonIcon_));
+    }
+
+    repositionMenuButtonWindow();
+}
+
+void AppMain::destroyMenuButtonWindow() {
+    if (menuButtonHwnd_) {
+        DestroyWindow(menuButtonHwnd_);
+        menuButtonHwnd_ = nullptr;
+    }
+    if (menuButtonIcon_) {
+        DestroyIcon(menuButtonIcon_);
+        menuButtonIcon_ = nullptr;
+    }
+}
+
+void AppMain::repositionMenuButtonWindow() {
+    if (!menuButtonHwnd_ || !hwnd_)
+        return;
+
+    RECT mainRect = {};
+    if (!GetWindowRect(hwnd_, &mainRect))
+        return;
+
+    RECT buttonRect = {};
+    if (!GetWindowRect(menuButtonHwnd_, &buttonRect))
+        return;
+
+    const auto winSize = GetWindowSize();
+    const auto anchor = routine_.GetModelMenuAnchorPosition(winSize);
+    const int width = buttonRect.right - buttonRect.left;
+    const int height = buttonRect.bottom - buttonRect.top;
+    const int margin = 8;
+    int x = mainRect.left + static_cast<int>(anchor.x) - width / 2;
+    int y = mainRect.bottom - static_cast<int>(anchor.y) - height / 2;
+    x = std::clamp(
+        x, static_cast<int>(mainRect.left) + margin,
+        static_cast<int>(mainRect.right) - width - margin);
+    y = std::clamp(
+        y, static_cast<int>(mainRect.top) + margin,
+        static_cast<int>(mainRect.bottom) - height - margin);
+    SetWindowPos(menuButtonHwnd_, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void AppMain::createDrawable() {
@@ -407,8 +562,96 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         routine_.OnGestureEnd();
         menu_.ShowMenu();
         return 0;
+    case AppMenu::YOMMD_WM_OPEN_MODEL_DIALOG:
+        if (const auto modelPath = selectModelFile(); modelPath.has_value()) {
+            routine_.ChangeModel(*modelPath);
+        }
+        return 0;
+    case AppMenu::YOMMD_WM_OPEN_MOTION_DIALOG: {
+        const auto motionPaths = selectMotionFiles();
+        if (!motionPaths.empty()) {
+            routine_.ChangeMotion(motionPaths);
+        }
+        return 0;
+    }
+    case AppMenu::YOMMD_WM_SELECT_MODEL:
+        if (const auto index = static_cast<size_t>(wParam); index < availableModels_.size()) {
+            routine_.ChangeModel(availableModels_[index]);
+        }
+        return 0;
+    case AppMenu::YOMMD_WM_SELECT_MOTION:
+        if (const auto index = static_cast<size_t>(wParam); index < availableMotions_.size()) {
+            routine_.ChangeMotion({availableMotions_[index]});
+        }
+        return 0;
+    case AppMenu::YOMMD_WM_SET_VIEW_DIRECTION:
+        routine_.SetModelRotation(
+            static_cast<float>(wParam) * (std::numbers::pi_v<float> / 2.0f));
+        return 0;
     }
     return DefWindowProcW(hwnd_, uMsg, wParam, lParam);
+}
+
+void AppMain::refreshInputFileLists() {
+    namespace fs = std::filesystem;
+
+    const auto appendFiles = [](const fs::path& root, const auto& exts, auto& out) {
+        out.clear();
+        if (!fs::exists(root))
+            return;
+
+        for (const auto& entry : fs::recursive_directory_iterator(root)) {
+            if (!entry.is_regular_file())
+                continue;
+
+            const auto ext = entry.path().extension().wstring();
+            if (std::find(exts.begin(), exts.end(), ext) != exts.end()) {
+                out.push_back(fs::weakly_canonical(entry.path()));
+            }
+        }
+
+        std::sort(out.begin(), out.end());
+    };
+
+    appendFiles(
+        Path::makeAbsolute("input/model", Path::getWorkingDirectory()),
+        std::array<std::wstring, 2>{L".pmd", L".pmx"}, availableModels_);
+    appendFiles(
+        Path::makeAbsolute("input/motion", Path::getWorkingDirectory()),
+        std::array<std::wstring, 1>{L".vmd"}, availableMotions_);
+}
+
+std::optional<std::filesystem::path> AppMain::selectModelFile() const {
+    std::array<wchar_t, 32768> fileBuffer = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd_;
+    ofn.lpstrFilter =
+        L"MMD Models (*.pmx;*.pmd)\0*.pmx;*.pmd\0PMX Models (*.pmx)\0*.pmx\0PMD Models "
+        L"(*.pmd)\0*.pmd\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = fileBuffer.data();
+    ofn.nMaxFile = static_cast<DWORD>(fileBuffer.size());
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+    if (!GetOpenFileNameW(&ofn))
+        return std::nullopt;
+    return std::filesystem::path(fileBuffer.data());
+}
+
+std::vector<std::filesystem::path> AppMain::selectMotionFiles() const {
+    std::array<wchar_t, 32768> fileBuffer = {};
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd_;
+    ofn.lpstrFilter = L"VMD Motion (*.vmd)\0*.vmd\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = fileBuffer.data();
+    ofn.nMaxFile = static_cast<DWORD>(fileBuffer.size());
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
+                OFN_ALLOWMULTISELECT;
+
+    if (!GetOpenFileNameW(&ofn))
+        return {};
+    return parseDialogPaths(fileBuffer.data());
 }
 
 namespace Context {

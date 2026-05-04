@@ -54,6 +54,7 @@ public:
         pair<std::unique_ptr<saba::VMDAnimation>, std::unique_ptr<saba::VMDCameraAnimation>>;
     void LoadModel(const Path& modelPath, const Path& resourcePath);
     void LoadMotion(const std::vector<Path>& paths);
+    void Reset();
     bool IsModelLoaded() const;
     const std::shared_ptr<saba::MMDModel> GetModel() const;
     const std::vector<Animation>& GetAnimations() const;
@@ -69,6 +70,7 @@ class ModelEmphasizer : private NonCopyable {
 public:
     void Init();
     void Draw();
+    void Terminate();
 
 private:
     sg_bindings binds_;
@@ -106,9 +108,11 @@ public:
     void OnGestureZoom(GesturePhase phase, float delta);
     void SetDefaultTranslation(glm::vec2 pos);
     void SetDefaultScaling(float scale);
+    void SetRotation(float rotation);
     void ResetPosition();
     float GetScale() const;
     float GetRotation() const;
+    glm::vec2 GetTranslation() const;
 
 private:
     static bool isDifferentPoint(const glm::vec2& p1, const glm::vec2& p2);
@@ -168,11 +172,19 @@ public:
     void OnGestureZoom(GesturePhase phase, float delta);
     float GetModelScale() const;
     void ResetModelPosition();
+    void ChangeModel(const std::filesystem::path& modelPath);
+    void ChangeMotion(const std::vector<std::filesystem::path>& motionPaths);
+    void SetModelRotation(float rotation);
+    void SetModelScale(float scale);
+    glm::vec2 GetModelMenuAnchorPosition(const glm::vec2& windowSize) const;
     void ParseConfig(const CmdArgs& args);
     const Config& GetConfig() const;
 
 private:
     using ImageMap = std::map<std::string, Image>;
+    void initScene();
+    void destroyScene();
+    void reloadScene(const Config& config);
     void initBuffers();
     void initTextures();
     void initPipeline();

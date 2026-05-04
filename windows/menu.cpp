@@ -1,4 +1,5 @@
 #include "menu.hpp"
+#include <filesystem>
 #include <dwmapi.h>
 #include "main.hpp"
 
@@ -21,6 +22,15 @@ private:
 
 using UniqueHWND = UniqueHandler<HWND, decltype(&DestroyWindow), &DestroyWindow>;
 using UniqueHMENU = UniqueHandler<HMENU, decltype(&DestroyMenu), &DestroyMenu>;
+
+std::wstring makeMenuLabel(
+    const std::filesystem::path& path,
+    const std::filesystem::path& root) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto rel = fs::relative(path, root, ec);
+    return (ec ? path.filename() : rel).wstring();
+}
 }  // namespace
 
 AppMenu::AppMenu() : hMenuThread_(nullptr), hTaskbarIcon_(nullptr) {}
@@ -129,12 +139,55 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
         }
     }
 
+    const auto modelRoot = Path::makeAbsolute("input/model", Path::getWorkingDirectory());
+    const auto motionRoot = Path::makeAbsolute("input/motion", Path::getWorkingDirectory());
+    const auto& models = getAppMain().GetAvailableModels();
+    const auto& motions = getAppMain().GetAvailableMotions();
+
+    UniqueHMENU hModelsMenu = CreatePopupMenu();
+    for (size_t i = 0; i < models.size(); ++i) {
+        const auto op = Cmd::Combine(Cmd::SelectModel, static_cast<Cmd::UnderlyingType>(i));
+        const auto title = makeMenuLabel(models[i], modelRoot);
+        AppendMenuW(hModelsMenu, MF_STRING, op, title.c_str());
+    }
+    if (!models.empty())
+        AppendMenuW(hModelsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(hModelsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeModel), L"&Other...");
+
+    UniqueHMENU hMotionsMenu = CreatePopupMenu();
+    for (size_t i = 0; i < motions.size(); ++i) {
+        const auto op = Cmd::Combine(Cmd::SelectMotion, static_cast<Cmd::UnderlyingType>(i));
+        const auto title = makeMenuLabel(motions[i], motionRoot);
+        AppendMenuW(hMotionsMenu, MF_STRING, op, title.c_str());
+    }
+    if (!motions.empty())
+        AppendMenuW(hMotionsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(hMotionsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeMotion), L"&Other...");
+
+    UniqueHMENU hViewDirectionMenu = CreatePopupMenu();
+    AppendMenuW(
+        hViewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 0), L"&Front");
+    AppendMenuW(
+        hViewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 1), L"&Right");
+    AppendMenuW(
+        hViewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 2), L"&Back");
+    AppendMenuW(
+        hViewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 3), L"&Left");
+
     UniqueHMENU hmenu = CreatePopupMenu();
     if (parentWinExStyle & WS_EX_TRANSPARENT) {
         AppendMenuW(hmenu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse), L"&Enable Mouse");
     } else {
         AppendMenuW(hmenu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse), L"&Disable Mouse");
     }
+    AppendMenuW(
+        hmenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hModelsMenu.GetRawHandler()), L"Change &Model");
+    AppendMenuW(
+        hmenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hMotionsMenu.GetRawHandler()),
+        L"Change M&otion");
+    AppendMenuW(
+        hmenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hViewDirectionMenu.GetRawHandler()),
+        L"View &Direction");
     AppendMenuW(hmenu, MF_STRING, Enum::underlyCast(Cmd::ResetPosition), L"&Reset Position");
     AppendMenuW(hmenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(
@@ -168,6 +221,21 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
         if (parentWinExStyle != 0) {
             SetWindowLongW(parentWin, GWL_EXSTYLE, parentWinExStyle ^ WS_EX_TRANSPARENT);
         }
+        break;
+    case Cmd::ChangeModel:
+        PostMessageW(parentWin, YOMMD_WM_OPEN_MODEL_DIALOG, 0, 0);
+        break;
+    case Cmd::ChangeMotion:
+        PostMessageW(parentWin, YOMMD_WM_OPEN_MOTION_DIALOG, 0, 0);
+        break;
+    case Cmd::SelectModel:
+        PostMessageW(parentWin, YOMMD_WM_SELECT_MODEL, Cmd::GetUserData(op), 0);
+        break;
+    case Cmd::SelectMotion:
+        PostMessageW(parentWin, YOMMD_WM_SELECT_MOTION, Cmd::GetUserData(op), 0);
+        break;
+    case Cmd::SetViewDirection:
+        PostMessageW(parentWin, YOMMD_WM_SET_VIEW_DIRECTION, Cmd::GetUserData(op), 0);
         break;
     case Cmd::ResetPosition:
         getAppMain().GetRoutine().ResetModelPosition();

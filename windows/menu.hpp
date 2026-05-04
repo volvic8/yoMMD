@@ -19,6 +19,11 @@ public:
 public:
     static constexpr UINT YOMMD_WM_TOGGLE_ENABLE_MOUSE = WM_APP;
     static constexpr UINT YOMMD_WM_SHOW_TASKBAR_MENU = WM_APP + 1;
+    static constexpr UINT YOMMD_WM_OPEN_MODEL_DIALOG = WM_APP + 2;
+    static constexpr UINT YOMMD_WM_OPEN_MOTION_DIALOG = WM_APP + 3;
+    static constexpr UINT YOMMD_WM_SELECT_MODEL = WM_APP + 4;
+    static constexpr UINT YOMMD_WM_SELECT_MOTION = WM_APP + 5;
+    static constexpr UINT YOMMD_WM_SET_VIEW_DIRECTION = WM_APP + 6;
 
 private:
     static DWORD WINAPI showMenu(LPVOID param);
@@ -49,6 +54,11 @@ private:
         enum class Kind : UnderlyingType {
             None,
             EnableMouse,
+            ChangeModel,
+            ChangeMotion,
+            SelectModel,
+            SelectMotion,
+            SetViewDirection,
             ResetPosition,
             SelectScreen,
             HideWindow,

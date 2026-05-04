@@ -144,6 +144,11 @@ void MMD::LoadMotion(const std::vector<std::filesystem::path>& paths) {
     animations_.push_back(std::make_pair(std::move(vmdAnim), std::move(cameraAnim)));
 }
 
+void MMD::Reset() {
+    animations_.clear();
+    model_.reset();
+}
+
 bool MMD::IsModelLoaded() const {
     return static_cast<bool>(model_);
 }
@@ -244,6 +249,25 @@ void ModelEmphasizer::Draw() {
     sg_draw(0, 6, 1);
 }
 
+void ModelEmphasizer::Terminate() {
+    if (binds_.vertex_buffers[0].id != SG_INVALID_ID) {
+        sg_destroy_buffer(binds_.vertex_buffers[0]);
+        binds_.vertex_buffers[0] = {};
+    }
+    if (binds_.index_buffer.id != SG_INVALID_ID) {
+        sg_destroy_buffer(binds_.index_buffer);
+        binds_.index_buffer = {};
+    }
+    if (pipeline_.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_);
+        pipeline_ = {};
+    }
+    if (shader_.id != SG_INVALID_ID) {
+        sg_destroy_shader(shader_);
+        shader_ = {};
+    }
+}
+
 void UserView::SetCallback(const Callback& callback) {
     callback_ = callback;
 }
@@ -331,6 +355,13 @@ void UserView::SetDefaultScaling(float scale) {
     defaultTransform_.scale = scale;
 }
 
+void UserView::SetRotation(float rotation) {
+    transform_.rotation = rotation;
+    defaultTransform_.rotation = rotation;
+    if (callback_.OnRotationChanged)
+        callback_.OnRotationChanged();
+}
+
 void UserView::ResetPosition() {
     transform_ = defaultTransform_;
 }
@@ -341,6 +372,10 @@ float UserView::GetScale() const {
 
 float UserView::GetRotation() const {
     return transform_.rotation;
+}
+
+glm::vec2 UserView::GetTranslation() const {
+    return glm::vec2(transform_.translation.x, transform_.translation.y);
 }
 
 void UserView::changeScale(float newScale, glm::vec2 refpoint) {
@@ -409,6 +444,7 @@ glm::vec2 UserView::toWindowCoord(const glm::vec2& src, const glm::vec2& transla
 }
 
 Routine::Routine() :
+    shouldTerminate_(false),
     passAction_(
         {.colors = {{.load_action = SG_LOADACTION_CLEAR, .clear_value = {0, 0, 0, 0}}}}),
     binds_({}),
@@ -427,6 +463,27 @@ Routine::~Routine() {
 }
 
 void Routine::Init() {
+    if (!sg_isvalid()) {
+        const sg_desc desc = {
+            .logger =
+                {
+                    .func = Slog::Logger,
+                },
+            .environment = Context::getSokolEnvironment(),
+        };
+        sg_setup(&desc);
+        stm_setup();
+
+        const sg_backend backend = sg_query_backend();
+        shaderMMD_ = sg_make_shader(mmd_shader_desc(backend));
+        modelEmphasizer_.Init();
+    }
+
+    initScene();
+    shouldTerminate_ = true;
+}
+
+void Routine::initScene() {
     namespace fs = std::filesystem;
     fs::path resourcePath = "<embedded-toons>";
 
@@ -441,23 +498,9 @@ void Routine::Init() {
         }
     }
 
-    const sg_desc desc = {
-        .logger =
-            {
-                .func = Slog::Logger,
-            },
-        .environment = Context::getSokolEnvironment(),
-    };
-    sg_setup(&desc);
-    stm_setup();
-
-    const sg_backend backend = sg_query_backend();
-    shaderMMD_ = sg_make_shader(mmd_shader_desc(backend));
-
     initBuffers();
     initTextures();
     initPipeline();
-    modelEmphasizer_.Init();
 
     binds_.index_buffer = ibo_;
     binds_.vertex_buffers[ATTR_mmd_in_Pos] = posVB_;
@@ -480,7 +523,6 @@ void Routine::Init() {
     selectNextMotion();
     needBridgeMotions_ = false;
     timeBeginAnimation_ = timeLastFrame_ = stm_now();
-    shouldTerminate_ = true;
 }
 
 void Routine::initBuffers() {
@@ -893,31 +935,75 @@ void Routine::Terminate() {
     if (!shouldTerminate_)
         return;
 
+    destroyScene();
+
+    modelEmphasizer_.Terminate();
+
+    if (shaderMMD_.id != SG_INVALID_ID) {
+        sg_destroy_shader(shaderMMD_);
+        shaderMMD_ = {};
+    }
+
+    sg_shutdown();
+
+    shouldTerminate_ = false;
+}
+
+void Routine::destroyScene() {
+    binds_ = {};
+
     for (auto& texture : textures_) {
         texture.second.destroy();
     }
 
     motionID_ = 0;
+    needBridgeMotions_ = false;
     motionWeights_.clear();
     induces_.clear();
     texImages_.clear();
     textures_.clear();
     materials_.clear();
+    mmd_.Reset();
 
-    sg_destroy_shader(shaderMMD_);
-
-    sg_destroy_buffer(posVB_);
-    sg_destroy_buffer(normVB_);
-    sg_destroy_buffer(uvVB_);
+    if (posVB_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(posVB_);
+        posVB_ = {};
+    }
+    if (normVB_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(normVB_);
+        normVB_ = {};
+    }
+    if (uvVB_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(uvVB_);
+        uvVB_ = {};
+    }
+    if (ibo_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(ibo_);
+        ibo_ = {};
+    }
 
     dummyTex_.destroy();
 
-    sg_destroy_pipeline(pipeline_frontface_);
-    sg_destroy_pipeline(pipeline_bothface_);
-
-    sg_shutdown();
-
-    shouldTerminate_ = false;
+    if (pipeline_frontface_.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_frontface_);
+        pipeline_frontface_ = {};
+    }
+    if (pipeline_bothface_.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_bothface_);
+        pipeline_bothface_ = {};
+    }
+    if (sampler_texture_.id != SG_INVALID_ID) {
+        sg_destroy_sampler(sampler_texture_);
+        sampler_texture_ = {};
+    }
+    if (sampler_sphere_texture_.id != SG_INVALID_ID) {
+        sg_destroy_sampler(sampler_sphere_texture_);
+        sampler_sphere_texture_ = {};
+    }
+    if (sampler_toon_texture_.id != SG_INVALID_ID) {
+        sg_destroy_sampler(sampler_toon_texture_);
+        sampler_toon_texture_ = {};
+    }
 }
 
 void Routine::OnGestureBegin() {
@@ -946,6 +1032,51 @@ float Routine::GetModelScale() const {
 
 void Routine::ResetModelPosition() {
     userView_.ResetPosition();
+}
+
+void Routine::ChangeModel(const std::filesystem::path& modelPath) {
+    Config nextConfig = config_;
+    nextConfig.model = modelPath;
+    nextConfig.motions.clear();
+    reloadScene(nextConfig);
+}
+
+void Routine::ChangeMotion(const std::vector<std::filesystem::path>& motionPaths) {
+    if (motionPaths.empty())
+        return;
+
+    Config nextConfig = config_;
+    nextConfig.motions.clear();
+    nextConfig.motions.push_back(Config::Motion{
+        .disabled = false,
+        .weight = 1,
+        .paths = motionPaths,
+    });
+    reloadScene(nextConfig);
+}
+
+void Routine::SetModelRotation(float rotation) {
+    userView_.SetRotation(rotation);
+}
+
+void Routine::SetModelScale(float scale) {
+    userView_.SetDefaultScaling(scale);
+}
+
+glm::vec2 Routine::GetModelMenuAnchorPosition(const glm::vec2& windowSize) const {
+    const auto translation = userView_.GetTranslation();
+    const auto scale = userView_.GetScale();
+    glm::vec2 center = (translation + glm::vec2(1.0f, 1.0f)) * windowSize / 2.0f;
+
+    // Approximate the point slightly above the model's head from its center and scale.
+    center.y += windowSize.y * 0.58f * scale;
+    return center;
+}
+
+void Routine::reloadScene(const Config& config) {
+    destroyScene();
+    config_ = config;
+    initScene();
 }
 
 void Routine::ParseConfig(const CmdArgs& args) {
