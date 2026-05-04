@@ -1077,6 +1077,8 @@ void Routine::SetModelRotation(float rotation) {
 }
 
 void Routine::SetModelScale(float scale) {
+    if (scale < 0.4f)
+        scale = 0.4f;
     userView_.SetDefaultScaling(scale);
 }
 

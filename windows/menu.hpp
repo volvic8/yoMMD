@@ -25,6 +25,7 @@ public:
     static constexpr UINT YOMMD_WM_SELECT_MODEL = WM_APP + 4;
     static constexpr UINT YOMMD_WM_SELECT_MOTION = WM_APP + 5;
     static constexpr UINT YOMMD_WM_SET_VIEW_DIRECTION = WM_APP + 6;
+    static constexpr UINT YOMMD_WM_ADJUST_SCALE = WM_APP + 7;
 
 private:
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -32,6 +33,7 @@ private:
     void handleCommand(UINT_PTR cmd, HWND sourceHwnd);
     void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
     void showSelectionMenu(HWND sourceHwnd, bool isModelSelection);
+    void updateScaleControls();
 
     void createTaskbar();
 
@@ -90,6 +92,8 @@ private:
     static constexpr PCWSTR wcMenuName = L"yoMMD-menu-window";
 
     HWND hMenuWindow_;
+    HWND hScaleTrackbar_;
+    HWND hScaleValueLabel_;
     HICON hTaskbarIcon_;
     HFONT hMenuFont_;
     NOTIFYICONDATAW taskbarIconDesc_;

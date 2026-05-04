@@ -117,6 +117,11 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
             PostMessageW(owner, AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU, 0, WM_RBUTTONUP);
         }
         return 0;
+    case WM_MOUSEWHEEL:
+        if (owner) {
+            PostMessageW(owner, AppMenu::YOMMD_WM_ADJUST_SCALE, wParam, 0);
+        }
+        return 0;
     }
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
@@ -124,7 +129,7 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 
 AppMain::AppMain() :
     isRunning_(true),
-    mouseInteractionEnabled_(false),
+    mouseInteractionEnabled_(true),
     mouseGestureActive_(false),
     sampleCount_(Constant::PreferredSampleCount),
     hwnd_(nullptr),
@@ -654,9 +659,15 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
     case WM_MOUSEWHEEL: {
-        const int deltaDeg = GET_WHEEL_DELTA_WPARAM(wParam) * WHEEL_DELTA;
-        const float delta = static_cast<float>(deltaDeg) / 360.0f;
-        routine_.OnWheelScrolled(delta);
+        const float step = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
+                           static_cast<float>(WHEEL_DELTA) * 0.08f;
+        routine_.SetModelScale(routine_.GetModelScale() + step);
+        return 0;
+    }
+    case AppMenu::YOMMD_WM_ADJUST_SCALE: {
+        const float step = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wParam)) /
+                           static_cast<float>(WHEEL_DELTA) * 0.08f;
+        routine_.SetModelScale(routine_.GetModelScale() + step);
         return 0;
     }
     case AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU:
@@ -819,7 +830,7 @@ int getSampleCount() {
     return getAppMain().GetSampleCount();
 }
 bool shouldEmphasizeModel() {
-    return getAppMain().IsMenuOpened();
+    return false;
 }
 }  // namespace Context
 

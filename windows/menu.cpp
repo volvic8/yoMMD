@@ -2,6 +2,7 @@
 #include <commctrl.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 #include <string_view>
@@ -11,6 +12,8 @@
 namespace {
 constexpr COLORREF kPanelBg = RGB(28, 31, 38);
 constexpr COLORREF kTextPrimary = RGB(242, 244, 248);
+constexpr int kScaleTrackMin = 20;
+constexpr int kScaleTrackMax = 75;
 HBRUSH getPanelBrush() {
     static HBRUSH brush = CreateSolidBrush(kPanelBg);
     return brush;
@@ -32,6 +35,15 @@ std::wstring makeButtonLabel(
     const std::filesystem::path& path,
     size_t maxLength) {
     return std::wstring(prefix) + L": " + toDisplayName(path, maxLength);
+}
+
+int scaleToTrackPos(float scale) {
+    const int pos = static_cast<int>(std::lround(scale * 50.0f));
+    return std::clamp(pos, kScaleTrackMin, kScaleTrackMax);
+}
+
+float trackPosToScale(int pos) {
+    return static_cast<float>(std::clamp(pos, kScaleTrackMin, kScaleTrackMax)) / 50.0f;
 }
 
 void applyMenuFont(HWND hwnd, HFONT font) {
@@ -88,6 +100,8 @@ std::wstring makeMenuLabel(
 
 AppMenu::AppMenu() :
     hMenuWindow_(nullptr),
+    hScaleTrackbar_(nullptr),
+    hScaleValueLabel_(nullptr),
     hTaskbarIcon_(nullptr),
     hMenuFont_(nullptr),
     isMenuOpened_(false) {}
@@ -97,6 +111,9 @@ AppMenu::~AppMenu() {
 }
 
 void AppMenu::Setup() {
+    INITCOMMONCONTROLSEX icc = {.dwSize = sizeof(icc), .dwICC = ICC_BAR_CLASSES};
+    InitCommonControlsEx(&icc);
+
     WNDCLASSW wc = {};
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = AppMenu::windowProc;
@@ -134,6 +151,8 @@ void AppMenu::destroyMenuWindow() {
         DestroyWindow(hMenuWindow_);
         hMenuWindow_ = nullptr;
     }
+    hScaleTrackbar_ = nullptr;
+    hScaleValueLabel_ = nullptr;
     isMenuOpened_ = false;
 }
 
@@ -148,15 +167,15 @@ void AppMenu::ShowMenu() {
     const auto& config = getAppMain().GetRoutine().GetConfig();
 
     constexpr int width = 360;
-    constexpr int margin = 14;
+    constexpr int margin = 12;
     constexpr int rowH = 18;
     constexpr int btnH = 28;
-    constexpr int gap = 8;
+    constexpr int gap = 6;
     constexpr int smallBtnW = 42;
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 380;
+    int height = 280;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -229,11 +248,6 @@ void AppMenu::ShowMenu() {
         return child;
     };
 
-    makeStatic(L"yoMMD", margin, y, width - margin * 2, rowH, SS_LEFT);
-    y += rowH + 2;
-    makeStatic(L"Quick controls", margin, y, width - margin * 2, rowH, SS_LEFT);
-    y += rowH + gap;
-
     makeStatic(L"Change Model", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevModel));
@@ -263,6 +277,21 @@ void AppMenu::ShowMenu() {
         L">", width - margin - smallBtnW, y, smallBtnW, btnH,
         Enum::underlyCast(Cmd::NextMotion));
     y += btnH + gap;
+
+    makeStatic(L"Scale", margin, y, 64, rowH, SS_LEFT);
+    hScaleValueLabel_ = makeStatic(L"", width - margin - 72, y, 72, rowH, SS_RIGHT);
+    y += rowH + 2;
+    hScaleTrackbar_ = CreateWindowExW(
+        0, TRACKBAR_CLASSW, L"", WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS, margin, y,
+        width - margin * 2, 28, hMenuWindow_, nullptr, GetModuleHandleW(nullptr), nullptr);
+    applyMenuFont(hScaleTrackbar_, hMenuFont_);
+    SendMessageW(hScaleTrackbar_, TBM_SETRANGE, TRUE, MAKELPARAM(kScaleTrackMin, kScaleTrackMax));
+    SendMessageW(
+        hScaleTrackbar_, TBM_SETPOS, TRUE,
+        scaleToTrackPos(getAppMain().GetRoutine().GetModelScale()));
+    updateScaleControls();
+    y += btnH + gap;
+
     makeButton(
         L"Reset Position", margin, y, width - margin * 2, btnH,
         Enum::underlyCast(Cmd::ResetPosition));
@@ -406,8 +435,13 @@ void AppMenu::handleCommand(UINT_PTR op, HWND sourceHwnd) {
 void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     const HWND parentWin = getAppMain().GetWindowHandle();
     const auto& config = getAppMain().GetRoutine().GetConfig();
+    const auto cmd = Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op));
+    const bool shouldRefreshCompactMenu =
+        closeCompactMenu &&
+        (cmd == Cmd::PrevModel || cmd == Cmd::NextModel || cmd == Cmd::PrevMotion ||
+         cmd == Cmd::NextMotion || cmd == Cmd::SelectModel || cmd == Cmd::SelectMotion);
 
-    switch (Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op))) {
+    switch (cmd) {
     case Cmd::EnableMouse:
         break;
     case Cmd::ChangeModel:
@@ -422,9 +456,9 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         if (!models.empty()) {
             auto itr = std::find(models.begin(), models.end(), config.model);
             size_t index = itr == models.end() ? 0 : static_cast<size_t>(itr - models.begin());
-            const int delta = Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op)) == Cmd::PrevModel ? -1 : 1;
+            const int delta = cmd == Cmd::PrevModel ? -1 : 1;
             const size_t next = (index + models.size() + delta) % models.size();
-            PostMessageW(parentWin, YOMMD_WM_SELECT_MODEL, next, 0);
+            SendMessageW(parentWin, YOMMD_WM_SELECT_MODEL, next, 0);
         }
         break;
     }
@@ -437,20 +471,19 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
                 current = config.motions.front().paths.front();
             auto itr = std::find(motions.begin(), motions.end(), current);
             size_t index = itr == motions.end() ? 0 : static_cast<size_t>(itr - motions.begin());
-            const int delta =
-                Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op)) == Cmd::PrevMotion ? -1 : 1;
+            const int delta = cmd == Cmd::PrevMotion ? -1 : 1;
             const size_t next = (index + motions.size() + delta) % motions.size();
-            PostMessageW(parentWin, YOMMD_WM_SELECT_MOTION, next, 0);
+            SendMessageW(parentWin, YOMMD_WM_SELECT_MOTION, next, 0);
         }
         break;
     }
     case Cmd::SelectModel:
-        PostMessageW(
+        SendMessageW(
             parentWin, YOMMD_WM_SELECT_MODEL,
             Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)), 0);
         break;
     case Cmd::SelectMotion:
-        PostMessageW(
+        SendMessageW(
             parentWin, YOMMD_WM_SELECT_MOTION,
             Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)), 0);
         break;
@@ -480,7 +513,10 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         break;
     }
 
-    if (closeCompactMenu) {
+    if (shouldRefreshCompactMenu) {
+        destroyMenuWindow();
+        ShowMenu();
+    } else if (closeCompactMenu) {
         destroyMenuWindow();
     }
 }
@@ -516,6 +552,17 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, bool isModelSelection) {
     }
 }
 
+void AppMenu::updateScaleControls() {
+    if (!hScaleTrackbar_ || !hScaleValueLabel_)
+        return;
+
+    const int pos = static_cast<int>(SendMessageW(hScaleTrackbar_, TBM_GETPOS, 0, 0));
+    const float scale = trackPosToScale(pos);
+    wchar_t label[32] = {};
+    swprintf_s(label, L"x%.2f", scale);
+    SetWindowTextW(hScaleValueLabel_, label);
+}
+
 LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     AppMenu *menu = reinterpret_cast<AppMenu *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (uMsg == WM_NCCREATE) {
@@ -548,6 +595,32 @@ LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         if (menu) {
             menu->handleCommand(static_cast<UINT_PTR>(LOWORD(wParam)), reinterpret_cast<HWND>(lParam));
             return 0;
+        }
+        break;
+    case WM_HSCROLL:
+        if (menu && reinterpret_cast<HWND>(lParam) == menu->hScaleTrackbar_) {
+            const int pos =
+                static_cast<int>(SendMessageW(menu->hScaleTrackbar_, TBM_GETPOS, 0, 0));
+            getAppMain().GetRoutine().SetModelScale(trackPosToScale(pos));
+            menu->updateScaleControls();
+            return 0;
+        }
+        break;
+    case WM_MOUSEWHEEL:
+        if (menu && menu->hScaleTrackbar_) {
+            POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            RECT trackRect = {};
+            GetWindowRect(menu->hScaleTrackbar_, &trackRect);
+            if (PtInRect(&trackRect, pt)) {
+                int pos =
+                    static_cast<int>(SendMessageW(menu->hScaleTrackbar_, TBM_GETPOS, 0, 0));
+                pos += GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1 : -1;
+                pos = std::clamp(pos, kScaleTrackMin, kScaleTrackMax);
+                SendMessageW(menu->hScaleTrackbar_, TBM_SETPOS, TRUE, pos);
+                getAppMain().GetRoutine().SetModelScale(trackPosToScale(pos));
+                menu->updateScaleControls();
+                return 0;
+            }
         }
         break;
     case WM_CLOSE:
