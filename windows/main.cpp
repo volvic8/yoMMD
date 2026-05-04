@@ -76,6 +76,8 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 
 AppMain::AppMain() :
     isRunning_(true),
+    mouseInteractionEnabled_(false),
+    mouseGestureActive_(false),
     sampleCount_(Constant::PreferredSampleCount),
     hwnd_(nullptr),
     menuButtonHwnd_(nullptr),
@@ -99,6 +101,7 @@ void AppMain::Setup(const CmdArgs& cmdArgs) {
 }
 
 void AppMain::UpdateDisplay() {
+    updateMouseTransparency();
     routine_.Update();
     routine_.Draw();
     repositionMenuButtonWindow();
@@ -131,6 +134,18 @@ void AppMain::ChangeScreen(int screenID) {
     constexpr UINT uFlags = SWP_SHOWWINDOW | SWP_NOACTIVATE;
     SetWindowPos(hwnd_, HWND_TOPMOST, r->left, r->top, cx, cy, uFlags);
     repositionMenuButtonWindow();
+}
+
+void AppMain::SetMouseInteractionEnabled(bool enabled) {
+    mouseInteractionEnabled_ = enabled;
+    if (!enabled) {
+        mouseGestureActive_ = false;
+    }
+    updateMouseTransparency();
+}
+
+bool AppMain::IsMouseInteractionEnabled() const {
+    return mouseInteractionEnabled_;
 }
 
 Routine& AppMain::GetRoutine() {
@@ -452,6 +467,37 @@ void AppMain::createDrawable() {
     dcompTarget_->SetRoot(dcompVisual_.Get());
 }
 
+void AppMain::updateMouseTransparency() {
+    if (!hwnd_)
+        return;
+
+    LONG exStyle = GetWindowLongW(hwnd_, GWL_EXSTYLE);
+    const LONG transparentBit = WS_EX_TRANSPARENT;
+
+    bool shouldBeTransparent = true;
+    if (mouseInteractionEnabled_) {
+        POINT pt;
+        if (GetCursorPos(&pt) && ScreenToClient(hwnd_, &pt)) {
+            const auto winSize = GetWindowSize();
+            const auto bounds = routine_.GetModelInteractionBounds(winSize);
+            const float x = static_cast<float>(pt.x);
+            const float y = winSize.y - static_cast<float>(pt.y);
+            const bool inside =
+                x >= bounds.x && x <= bounds.z && y >= bounds.y && y <= bounds.w;
+            shouldBeTransparent = !(inside || mouseGestureActive_ || menu_.IsMenuOpened());
+        }
+    }
+
+    const bool isTransparent = (exStyle & transparentBit) != 0;
+    if (shouldBeTransparent != isTransparent) {
+        if (shouldBeTransparent)
+            exStyle |= transparentBit;
+        else
+            exStyle &= ~transparentBit;
+        SetWindowLongW(hwnd_, GWL_EXSTYLE, exStyle);
+    }
+}
+
 // Check the state of multisampling support.
 // https://learn.microsoft.com/ja-jp/windows/uwp/gaming/multisampling--multi-sample-anti-aliasing--in-windows-store-apps
 int AppMain::determineSampleCount() const {
@@ -538,10 +584,13 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     case WM_LBUTTONDOWN:
+        mouseGestureActive_ = true;
         routine_.OnGestureBegin();
         return 0;
     case WM_LBUTTONUP:
+        mouseGestureActive_ = false;
         routine_.OnGestureEnd();
+        updateMouseTransparency();
         return 0;
     case WM_MOUSEMOVE:
         if (wParam & MK_LBUTTON) {
@@ -560,7 +609,9 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         // Fallthrough
     case WM_RBUTTONDOWN:
         routine_.OnGestureEnd();
+        mouseGestureActive_ = false;
         menu_.ShowMenu();
+        updateMouseTransparency();
         return 0;
     case AppMenu::YOMMD_WM_OPEN_MODEL_DIALOG:
         if (const auto modelPath = selectModelFile(); modelPath.has_value()) {

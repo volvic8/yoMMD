@@ -30,6 +30,8 @@ public:
     void Terminate();
     bool IsRunning() const;
     void ChangeScreen(int screenID);
+    void SetMouseInteractionEnabled(bool enabled);
+    bool IsMouseInteractionEnabled() const;
     Routine& GetRoutine();
     const HWND& GetWindowHandle() const;
     const std::vector<std::filesystem::path>& GetAvailableModels() const;
@@ -49,6 +51,7 @@ private:
     void destroyMenuButtonWindow();
     void repositionMenuButtonWindow();
     void createDrawable();
+    void updateMouseTransparency();
     int determineSampleCount() const;
     LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam);
     void refreshInputFileLists();
@@ -60,6 +63,8 @@ private:
     static constexpr PCWSTR menuButtonClassName_ = L"yoMMD Menu Button";
 
     bool isRunning_;
+    bool mouseInteractionEnabled_;
+    bool mouseGestureActive_;
     int sampleCount_;
     Routine routine_;
     AppMenu menu_;

@@ -177,6 +177,7 @@ public:
     void SetModelRotation(float rotation);
     void SetModelScale(float scale);
     glm::vec2 GetModelMenuAnchorPosition(const glm::vec2& windowSize) const;
+    glm::vec4 GetModelInteractionBounds(const glm::vec2& windowSize) const;
     void ParseConfig(const CmdArgs& args);
     const Config& GetConfig() const;
 

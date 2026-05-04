@@ -1073,6 +1073,18 @@ glm::vec2 Routine::GetModelMenuAnchorPosition(const glm::vec2& windowSize) const
     return center;
 }
 
+glm::vec4 Routine::GetModelInteractionBounds(const glm::vec2& windowSize) const {
+    const auto translation = userView_.GetTranslation();
+    const auto scale = userView_.GetScale();
+    const glm::vec2 center = (translation + glm::vec2(1.0f, 1.0f)) * windowSize / 2.0f;
+
+    // Approximate a clickable silhouette around the model in screen space.
+    const float halfWidth = windowSize.x * 0.11f * scale;
+    const float top = center.y + windowSize.y * 0.34f * scale;
+    const float bottom = center.y - windowSize.y * 0.48f * scale;
+    return glm::vec4(center.x - halfWidth, bottom, center.x + halfWidth, top);
+}
+
 void Routine::reloadScene(const Config& config) {
     destroyScene();
     config_ = config;

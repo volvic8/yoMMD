@@ -175,7 +175,7 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
         hViewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 3), L"&Left");
 
     UniqueHMENU hmenu = CreatePopupMenu();
-    if (parentWinExStyle & WS_EX_TRANSPARENT) {
+    if (!getAppMain().IsMouseInteractionEnabled()) {
         AppendMenuW(hmenu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse), L"&Enable Mouse");
     } else {
         AppendMenuW(hmenu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse), L"&Disable Mouse");
@@ -218,9 +218,7 @@ DWORD WINAPI AppMenu::showMenu(LPVOID param) {
 
     switch (Cmd::GetCmd(op)) {
     case Cmd::EnableMouse:
-        if (parentWinExStyle != 0) {
-            SetWindowLongW(parentWin, GWL_EXSTYLE, parentWinExStyle ^ WS_EX_TRANSPARENT);
-        }
+        getAppMain().SetMouseInteractionEnabled(!getAppMain().IsMouseInteractionEnabled());
         break;
     case Cmd::ChangeModel:
         PostMessageW(parentWin, YOMMD_WM_OPEN_MODEL_DIALOG, 0, 0);
