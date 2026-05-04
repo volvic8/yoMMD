@@ -14,6 +14,7 @@ public:
     void Setup();
     void Terminate();
     void ShowMenu();
+    void ShowTaskbarMenu();
     bool IsMenuOpened() const;
 
 public:
@@ -29,6 +30,7 @@ private:
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void destroyMenuWindow();
     void handleCommand(UINT_PTR cmd);
+    void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
 
     void createTaskbar();
 

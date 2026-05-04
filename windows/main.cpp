@@ -1,6 +1,7 @@
 #include "main.hpp"
 #include <array>
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <numbers>
 #include <string>
@@ -17,6 +18,17 @@
 #include "sokol_time.h"
 
 namespace {
+struct MenuButtonDragState {
+    bool tracking = false;
+    bool dragging = false;
+    POINT startPoint = {};
+};
+
+MenuButtonDragState& getMenuButtonDragState() {
+    static MenuButtonDragState state;
+    return state;
+}
+
 std::vector<std::filesystem::path> parseDialogPaths(const wchar_t *buffer) {
     std::vector<std::filesystem::path> paths;
     if (!buffer || !*buffer)
@@ -44,6 +56,7 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
     }
 
     const HWND owner = reinterpret_cast<HWND>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto& dragState = getMenuButtonDragState();
     switch (uMsg) {
     case WM_PAINT: {
         PAINTSTRUCT ps = {};
@@ -63,10 +76,45 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
         EndPaint(hwnd, &ps);
         return 0;
     }
+    case WM_LBUTTONDOWN:
+        dragState.tracking = true;
+        dragState.dragging = false;
+        GetCursorPos(&dragState.startPoint);
+        SetCapture(hwnd);
+        return 0;
+    case WM_MOUSEMOVE:
+        if (dragState.tracking && owner) {
+            POINT pt = {};
+            GetCursorPos(&pt);
+            const int dx = pt.x - dragState.startPoint.x;
+            const int dy = pt.y - dragState.startPoint.y;
+            if (!dragState.dragging && (std::abs(dx) > 4 || std::abs(dy) > 4)) {
+                dragState.dragging = true;
+                PostMessageW(owner, WM_LBUTTONDOWN, MK_LBUTTON, 0);
+            }
+            if (dragState.dragging) {
+                PostMessageW(owner, WM_MOUSEMOVE, MK_LBUTTON, 0);
+            }
+        }
+        return 0;
     case WM_LBUTTONUP:
+        if (GetCapture() == hwnd)
+            ReleaseCapture();
+        if (dragState.dragging && owner) {
+            PostMessageW(owner, WM_LBUTTONUP, 0, 0);
+        } else if (owner) {
+            PostMessageW(owner, AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU, 0, WM_LBUTTONUP);
+        }
+        dragState = {};
+        return 0;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(lParam) != hwnd) {
+            dragState = {};
+        }
+        return 0;
     case WM_RBUTTONUP:
         if (owner) {
-            PostMessageW(owner, AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU, 0, WM_RBUTTONDOWN);
+            PostMessageW(owner, AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU, 0, WM_RBUTTONUP);
         }
         return 0;
     }
@@ -612,9 +660,18 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
     case AppMenu::YOMMD_WM_SHOW_TASKBAR_MENU:
-        if (const auto msg = LOWORD(lParam); !(msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN))
+        if (const auto msg = LOWORD(lParam);
+            !(msg == WM_LBUTTONUP || msg == WM_RBUTTONUP || msg == WM_CONTEXTMENU))
             return 0;
-        // Fallthrough
+        if (wParam == 0) {
+            routine_.OnGestureEnd();
+            mouseGestureActive_ = false;
+            menu_.ShowMenu();
+            updateMouseTransparency();
+        } else {
+            menu_.ShowTaskbarMenu();
+        }
+        return 0;
     case WM_RBUTTONDOWN:
         routine_.OnGestureEnd();
         mouseGestureActive_ = false;

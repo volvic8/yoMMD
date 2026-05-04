@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <memory>
 #include <string_view>
 #include <vector>
 #include "main.hpp"
@@ -53,6 +54,29 @@ int overlapArea(const RECT& a, const RECT& b) {
         return 0;
     return (intersection.right - intersection.left) * (intersection.bottom - intersection.top);
 }
+
+template <typename T, typename DeleteFunc, DeleteFunc deleteFunc>
+class UniqueHandler {
+public:
+    explicit UniqueHandler(T handler = nullptr) : handler_(handler, deleteFunc) {}
+    T GetRawHandler() const { return handler_.get(); }
+    operator T() const { return GetRawHandler(); }
+
+private:
+    std::unique_ptr<std::remove_pointer_t<T>, DeleteFunc> handler_;
+};
+
+using UniqueHWND = UniqueHandler<HWND, decltype(&DestroyWindow), &DestroyWindow>;
+using UniqueHMENU = UniqueHandler<HMENU, decltype(&DestroyMenu), &DestroyMenu>;
+
+std::wstring makeMenuLabel(
+    const std::filesystem::path& path,
+    const std::filesystem::path& root) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto rel = fs::relative(path, root, ec);
+    return (ec ? path.filename() : rel).wstring();
+}
 }  // namespace
 
 AppMenu::AppMenu() :
@@ -76,7 +100,7 @@ void AppMenu::Setup() {
     RegisterClassW(&wc);
 
     hMenuFont_ = CreateFontW(
-        -18, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+        -16, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
         CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
 
     createTaskbar();
@@ -116,14 +140,14 @@ void AppMenu::ShowMenu() {
     const RECT buttonRect = getAppMain().GetMenuButtonRect();
     const auto& config = getAppMain().GetRoutine().GetConfig();
 
-    constexpr int width = 292;
+    constexpr int width = 340;
     constexpr int margin = 14;
     constexpr int rowH = 18;
     constexpr int valueH = 24;
     constexpr int btnH = 28;
     constexpr int gap = 8;
-    constexpr int smallBtnW = 40;
-    constexpr int midBtnW = 60;
+    constexpr int smallBtnW = 42;
+    constexpr int midBtnW = 72;
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
@@ -213,7 +237,7 @@ void AppMenu::ShowMenu() {
     makeStatic(L"Model", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
     makeStatic(
-        toDisplayName(config.model, 34), margin, y, width - margin * 2, valueH,
+        toDisplayName(config.model, 44), margin, y, width - margin * 2, valueH,
         SS_LEFT | SS_PATHELLIPSIS);
     y += valueH + 4;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevModel));
@@ -227,7 +251,7 @@ void AppMenu::ShowMenu() {
 
     std::wstring motionName = L"(no motion)";
     if (!config.motions.empty() && !config.motions.front().paths.empty()) {
-        motionName = toDisplayName(config.motions.front().paths.front(), 34);
+        motionName = toDisplayName(config.motions.front().paths.front(), 44);
     }
     makeStatic(L"Motion", margin, y, width - margin * 2, rowH, SS_LEFT);
     y += rowH + 2;
@@ -261,9 +285,9 @@ void AppMenu::ShowMenu() {
     y += btnH + gap;
 
     if (hasMultiScreen) {
-        makeButton(L"Screen 0", margin, y, 96, btnH, Cmd::Combine(Cmd::SelectScreen, 0));
+        makeButton(L"Screen 0", margin, y, 110, btnH, Cmd::Combine(Cmd::SelectScreen, 0));
         makeButton(
-            L"Screen 1", margin + 96 + gap, y, 96, btnH,
+            L"Screen 1", margin + 110 + gap, y, 110, btnH,
             Cmd::Combine(Cmd::SelectScreen, 1));
         y += btnH + gap;
     }
@@ -281,11 +305,118 @@ void AppMenu::ShowMenu() {
     isMenuOpened_ = true;
 }
 
+void AppMenu::ShowTaskbarMenu() {
+    const HWND& parentWin = getAppMain().GetWindowHandle();
+    if (!parentWin)
+        return;
+
+    POINT point = {};
+    if (!GetCursorPos(&point)) {
+        Err::Log("Failed to get mouse point");
+        return;
+    }
+
+    const LONG parentWinExStyle = GetWindowLongW(parentWin, GWL_EXSTYLE);
+
+    UniqueHWND menuWindow(CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wcMenuName, L"", WS_POPUP, 0, 0, 0,
+        0, parentWin, nullptr, GetModuleHandleW(nullptr), this));
+    if (!menuWindow.GetRawHandler()) {
+        Err::Log("Failed to create dummy window for taskbar menu.");
+        return;
+    }
+
+    UniqueHMENU screensMenu(CreatePopupMenu());
+    const HMONITOR curMonitorHandle =
+        MonitorFromWindow(getAppMain().GetWindowHandle(), MONITOR_DEFAULTTONULL);
+    const auto monitorHandles = getAllMonitorHandles();
+    for (int cnt = static_cast<int>(monitorHandles.size()), i = 0; i < cnt; ++i) {
+        const std::wstring title(L"&Screen" + std::to_wstring(i));
+        const auto op = Cmd::Combine(Cmd::SelectScreen, i);
+        AppendMenuW(screensMenu, MF_STRING, op, title.c_str());
+        if (monitorHandles[i] == curMonitorHandle) {
+            EnableMenuItem(screensMenu, op, MF_DISABLED);
+        }
+    }
+
+    const auto modelRoot = Path::makeAbsolute("input/model", Path::getWorkingDirectory());
+    const auto motionRoot = Path::makeAbsolute("input/motion", Path::getWorkingDirectory());
+    const auto& models = getAppMain().GetAvailableModels();
+    const auto& motions = getAppMain().GetAvailableMotions();
+
+    UniqueHMENU modelsMenu(CreatePopupMenu());
+    for (size_t i = 0; i < models.size(); ++i) {
+        const auto op = Cmd::Combine(Cmd::SelectModel, static_cast<Cmd::UnderlyingType>(i));
+        const auto title = makeMenuLabel(models[i], modelRoot);
+        AppendMenuW(modelsMenu, MF_STRING, op, title.c_str());
+    }
+    if (!models.empty())
+        AppendMenuW(modelsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(modelsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeModel), L"&Other...");
+
+    UniqueHMENU motionsMenu(CreatePopupMenu());
+    for (size_t i = 0; i < motions.size(); ++i) {
+        const auto op = Cmd::Combine(Cmd::SelectMotion, static_cast<Cmd::UnderlyingType>(i));
+        const auto title = makeMenuLabel(motions[i], motionRoot);
+        AppendMenuW(motionsMenu, MF_STRING, op, title.c_str());
+    }
+    if (!motions.empty())
+        AppendMenuW(motionsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(motionsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeMotion), L"&Other...");
+
+    UniqueHMENU viewDirectionMenu(CreatePopupMenu());
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 0), L"&Front");
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 1), L"&Right");
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 2), L"&Back");
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 3), L"&Left");
+
+    UniqueHMENU menu(CreatePopupMenu());
+    AppendMenuW(
+        menu, MF_STRING, Enum::underlyCast(Cmd::EnableMouse),
+        getAppMain().IsMouseInteractionEnabled() ? L"&Disable Mouse" : L"&Enable Mouse");
+    AppendMenuW(
+        menu, MF_POPUP, reinterpret_cast<UINT_PTR>(modelsMenu.GetRawHandler()), L"Change &Model");
+    AppendMenuW(
+        menu, MF_POPUP, reinterpret_cast<UINT_PTR>(motionsMenu.GetRawHandler()),
+        L"Change M&otion");
+    AppendMenuW(
+        menu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewDirectionMenu.GetRawHandler()),
+        L"View &Direction");
+    AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ResetPosition), L"&Reset Position");
+    AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(
+        menu, MF_POPUP, reinterpret_cast<UINT_PTR>(screensMenu.GetRawHandler()), L"&Select screen");
+    AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(
+        menu, MF_STRING, Enum::underlyCast(Cmd::HideWindow),
+        (GetWindowLongPtrW(parentWin, GWL_STYLE) & WS_VISIBLE) ? L"&Hide Window" : L"&Show Window");
+    AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::Quit), L"&Quit");
+
+    if (parentWinExStyle == 0) {
+        EnableMenuItem(menu, Enum::underlyCast(Cmd::EnableMouse), MF_DISABLED);
+    }
+    if (monitorHandles.size() <= 1) {
+        EnableMenuItem(menu, reinterpret_cast<UINT_PTR>(screensMenu.GetRawHandler()), MF_DISABLED);
+    }
+
+    constexpr UINT menuFlags = TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD;
+    SetForegroundWindow(menuWindow);
+    isMenuOpened_ = true;
+    const auto op = TrackPopupMenuEx(menu, menuFlags, point.x, point.y, menuWindow, nullptr);
+    isMenuOpened_ = false;
+    executeCommand(op, false);
+}
+
 bool AppMenu::IsMenuOpened() const {
     return isMenuOpened_;
 }
 
 void AppMenu::handleCommand(UINT_PTR op) {
+    executeCommand(op, true);
+}
+
+void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     const HWND parentWin = getAppMain().GetWindowHandle();
     const auto& config = getAppMain().GetRoutine().GetConfig();
 
@@ -363,7 +494,9 @@ void AppMenu::handleCommand(UINT_PTR op) {
         break;
     }
 
-    destroyMenuWindow();
+    if (closeCompactMenu) {
+        destroyMenuWindow();
+    }
 }
 
 LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
