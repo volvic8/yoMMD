@@ -179,7 +179,7 @@ void AppMenu::ShowMenu() {
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 314;
+    int height = 274;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -252,8 +252,6 @@ void AppMenu::ShowMenu() {
         return child;
     };
 
-    makeStatic(L"Change Model", margin, y, width - margin * 2, rowH, SS_LEFT);
-    y += rowH + 2;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevModel));
     makeButton(
         makeButtonLabel(L"Model", config.model, 28), margin + smallBtnW + gap, y,
@@ -270,8 +268,6 @@ void AppMenu::ShowMenu() {
     } else {
         motionName = L"Motion: (no motion)";
     }
-    makeStatic(L"Change Motion", margin, y, width - margin * 2, rowH, SS_LEFT);
-    y += rowH + 2;
     makeButton(L"<", margin, y, smallBtnW, btnH, Enum::underlyCast(Cmd::PrevMotion));
     makeButton(
         motionName, margin + smallBtnW + gap, y, width - margin * 2 - smallBtnW * 2 - gap * 2,
