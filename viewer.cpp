@@ -525,6 +525,8 @@ glm::vec2 UserView::toWindowCoord(const glm::vec2& src, const glm::vec2& transla
 
 Routine::Routine() :
     shouldTerminate_(false),
+    reactionModeEnabled_(false),
+    reactionModeSuspended_(false),
     viewDirectionModeXEnabled_(false),
     viewDirectionModeYEnabled_(false),
     passAction_(
@@ -533,6 +535,7 @@ Routine::Routine() :
     timeBeginAnimation_(0),
     timeLastFrame_(0),
     motionID_(0),
+    defaultMotionID_(std::nullopt),
     needBridgeMotions_(false),
     rand_(static_cast<int>(std::time(nullptr))) {
     userView_.SetCallback({
@@ -606,10 +609,17 @@ void Routine::initScene() {
         userView_.SetModelPivot(modelPivot);
     }
 
+    size_t enabledMotionIndex = 0;
+    bool foundDefaultMotion = false;
     for (const auto& motion : config_.motions) {
         if (!motion.disabled) {
             mmd_.LoadMotion(motion.paths);
             motionWeights_.push_back(motion.weight);
+            if (motion.isDefault && !foundDefaultMotion) {
+                defaultMotionID_ = enabledMotionIndex;
+                foundDefaultMotion = true;
+            }
+            ++enabledMotionIndex;
         }
     }
 
@@ -820,6 +830,11 @@ void Routine::selectNextMotion() {
     // Select next MMD motion by weighted rate.
     if (motionWeights_.empty())
         return;
+    if (defaultMotionID_.has_value()) {
+        motionID_ = *defaultMotionID_;
+        defaultMotionID_.reset();
+        return;
+    }
 
     unsigned int rnd = randDist_(rand_);
     unsigned int sum = 0;
@@ -837,6 +852,8 @@ void Routine::selectNextMotion() {
 }
 
 void Routine::Update() {
+    updateReaction();
+
     const auto size{Context::getWindowSize()};
     const auto model = mmd_.GetModel();
     const size_t vertCount = model->GetVertexCount();
@@ -1072,6 +1089,7 @@ void Routine::destroyScene() {
     }
 
     motionID_ = 0;
+    defaultMotionID_.reset();
     needBridgeMotions_ = false;
     motionWeights_.clear();
     induces_.clear();
@@ -1122,10 +1140,22 @@ void Routine::destroyScene() {
 }
 
 void Routine::OnGestureBegin() {
+    if (reactionModeEnabled_) {
+        reactionModeSuspended_ = true;
+    }
     userView_.OnGestureBegin();
 }
 
 void Routine::OnGestureEnd() {
+    if (reactionModeEnabled_) {
+        const auto state = userView_.GetState();
+        reactionState_.baseYaw = state.modelYaw;
+        reactionState_.basePitch = state.modelPitch;
+        reactionState_.currentYaw = state.modelYaw;
+        reactionState_.currentPitch = state.modelPitch;
+        reactionState_.active = true;
+        reactionModeSuspended_ = false;
+    }
     userView_.OnGestureEnd();
 }
 
@@ -1154,6 +1184,7 @@ float Routine::GetModelScale() const {
 }
 
 void Routine::ResetModelPosition() {
+    cancelReaction(true);
     userView_.ResetPosition();
 }
 
@@ -1171,9 +1202,16 @@ void Routine::ChangeMotion(const std::vector<std::filesystem::path>& motionPaths
     nextConfig.motions.clear();
     nextConfig.motions.push_back(Config::Motion{
         .disabled = false,
+        .isDefault = true,
         .weight = 1,
         .paths = motionPaths,
     });
+    reloadScene(nextConfig);
+}
+
+void Routine::RestoreDefaultMotions() {
+    Config nextConfig = config_;
+    nextConfig.motions.clear();
     reloadScene(nextConfig);
 }
 
@@ -1182,7 +1220,43 @@ void Routine::SetModelRotation(float rotation) {
 }
 
 void Routine::SetModelViewDirection(float yaw, float pitch) {
+    if (reactionModeEnabled_) {
+        const auto state = userView_.GetState();
+        reactionState_.baseYaw = yaw;
+        reactionState_.basePitch = pitch;
+        reactionState_.currentYaw = yaw;
+        reactionState_.currentPitch = pitch;
+        reactionState_.active = true;
+        userView_.RestoreState(UserView::State{
+            .rotation = state.rotation,
+            .modelYaw = yaw,
+            .modelPitch = pitch,
+            .scale = state.scale,
+            .translation = state.translation,
+        });
+        return;
+    }
     userView_.SetModelDirection(yaw, pitch);
+}
+
+void Routine::SetReactionModeEnabled(bool enabled) {
+    reactionModeEnabled_ = enabled;
+    if (enabled) {
+        const auto state = userView_.GetState();
+        reactionState_.active = true;
+        reactionState_.baseYaw = state.modelYaw;
+        reactionState_.basePitch = state.modelPitch;
+        reactionState_.currentYaw = state.modelYaw;
+        reactionState_.currentPitch = state.modelPitch;
+        reactionModeSuspended_ = false;
+    } else {
+        reactionModeSuspended_ = false;
+        cancelReaction(true);
+    }
+}
+
+bool Routine::IsReactionModeEnabled() const {
+    return reactionModeEnabled_;
 }
 
 void Routine::SetViewDirectionModeXEnabled(bool enabled) {
@@ -1225,6 +1299,7 @@ glm::vec4 Routine::GetModelInteractionBounds(const glm::vec2& windowSize) const 
 }
 
 void Routine::reloadScene(const Config& config) {
+    cancelReaction(true);
     const auto viewState = userView_.GetState();
     destroyScene();
     config_ = config;
@@ -1253,6 +1328,7 @@ void Routine::ParseConfig(const CmdArgs& args) {
         Err::Exit("No config file found.");
 
     config_ = Config::Parse(configFile);
+    baseConfig_ = config_;
 }
 
 const Config& Routine::GetConfig() const {
@@ -1307,4 +1383,73 @@ void Routine::updateGravity() {
     const float r = userView_.GetRotation();
     const btVector3 gravity(std::sin(r) * g, std::cos(r) * g, 0);
     mmd_.GetModel()->GetMMDPhysics()->GetDynamicsWorld()->setGravity(gravity);
+}
+
+void Routine::cancelReaction(bool restoreBaseDirection) {
+    if (!reactionState_.active)
+        return;
+
+    if (restoreBaseDirection) {
+        const auto state = userView_.GetState();
+        userView_.RestoreState(UserView::State{
+            .rotation = state.rotation,
+            .modelYaw = reactionState_.baseYaw,
+            .modelPitch = reactionState_.basePitch,
+            .scale = state.scale,
+            .translation = state.translation,
+        });
+    }
+    reactionState_.active = false;
+}
+
+void Routine::triggerReaction(float yawOffset, float pitchOffset) {
+    const auto state = userView_.GetState();
+    reactionState_.active = true;
+    reactionState_.currentYaw = reactionState_.baseYaw + yawOffset;
+    reactionState_.currentPitch = reactionState_.basePitch + pitchOffset;
+    userView_.RestoreState(UserView::State{
+        .rotation = state.rotation,
+        .modelYaw = reactionState_.currentYaw,
+        .modelPitch = reactionState_.currentPitch,
+        .scale = state.scale,
+        .translation = state.translation,
+    });
+}
+
+void Routine::updateReaction() {
+    if (!reactionModeEnabled_)
+        return;
+    if (reactionModeSuspended_)
+        return;
+    if (viewDirectionModeXEnabled_ || viewDirectionModeYEnabled_)
+        return;
+
+    const auto bounds = GetModelInteractionBounds(Context::getWindowSize());
+    const auto point = Context::getMousePosition();
+    const float centerX = (bounds.x + bounds.z) * 0.5f;
+    const float centerY = (bounds.y + bounds.w) * 0.5f;
+    const float halfWidth = std::max((bounds.z - bounds.x) * 0.9f, 1.0f);
+    const float halfHeight = std::max((bounds.w - bounds.y) * 0.9f, 1.0f);
+    const float normalizedX = std::clamp((point.x - centerX) / halfWidth, -1.0f, 1.0f);
+    const float normalizedY = std::clamp((point.y - centerY) / halfHeight, -1.0f, 1.0f);
+
+    constexpr float maxYawOffset = std::numbers::pi_v<float> * 0.13f;
+    constexpr float maxPitchOffsetDown = std::numbers::pi_v<float> * 0.12f;
+    constexpr float maxPitchOffsetUp = std::numbers::pi_v<float> * 0.18f;
+    const float maxPitchOffset = normalizedY >= 0.0f ? maxPitchOffsetUp : maxPitchOffsetDown;
+    const float targetYaw = reactionState_.baseYaw + normalizedX * maxYawOffset;
+    const float targetPitch = reactionState_.basePitch - normalizedY * maxPitchOffset;
+
+    const float elapsed = static_cast<float>(stm_sec(stm_since(timeLastFrame_)));
+    const float blend = std::clamp(elapsed * 10.0f, 0.0f, 1.0f);
+    if (!reactionState_.active) {
+        reactionState_.active = true;
+        reactionState_.currentYaw = reactionState_.baseYaw;
+        reactionState_.currentPitch = reactionState_.basePitch;
+    }
+    reactionState_.currentYaw += (targetYaw - reactionState_.currentYaw) * blend;
+    reactionState_.currentPitch += (targetPitch - reactionState_.currentPitch) * blend;
+    triggerReaction(
+        reactionState_.currentYaw - reactionState_.baseYaw,
+        reactionState_.currentPitch - reactionState_.basePitch);
 }

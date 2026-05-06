@@ -104,6 +104,7 @@ AppMenu::AppMenu() :
     hScaleValueLabel_(nullptr),
     hViewDirectionModeXButton_(nullptr),
     hViewDirectionModeYButton_(nullptr),
+    hReactionModeButton_(nullptr),
     hTaskbarIcon_(nullptr),
     hMenuFont_(nullptr),
     isMenuOpened_(false) {}
@@ -157,6 +158,7 @@ void AppMenu::destroyMenuWindow() {
     hScaleValueLabel_ = nullptr;
     hViewDirectionModeXButton_ = nullptr;
     hViewDirectionModeYButton_ = nullptr;
+    hReactionModeButton_ = nullptr;
     isMenuOpened_ = false;
 }
 
@@ -179,7 +181,7 @@ void AppMenu::ShowMenu() {
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 274;
+    int height = 308;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -304,6 +306,12 @@ void AppMenu::ShowMenu() {
         Enum::underlyCast(Cmd::ToggleViewDirectionModeY));
     y += btnH + gap;
 
+    hReactionModeButton_ = makeButton(
+        getAppMain().GetRoutine().IsReactionModeEnabled() ? L"Look At Cursor: On"
+                                                          : L"Look At Cursor: Off",
+        margin, y, width - margin * 2, btnH, Enum::underlyCast(Cmd::ToggleReactionMode));
+    y += btnH + gap;
+
     makeButton(
         L"Reset Position", margin, y, width - margin * 2, btnH,
         Enum::underlyCast(Cmd::ResetPosition));
@@ -380,6 +388,9 @@ void AppMenu::ShowTaskbarMenu() {
     AppendMenuW(modelsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeModel), L"&Other...");
 
     UniqueHMENU motionsMenu(CreatePopupMenu());
+    AppendMenuW(motionsMenu, MF_STRING, Enum::underlyCast(Cmd::DefaultMotion), L"&No Motion");
+    if (!motions.empty())
+        AppendMenuW(motionsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     for (size_t i = 0; i < motions.size(); ++i) {
         const auto op = Cmd::Combine(Cmd::SelectMotion, static_cast<Cmd::UnderlyingType>(i));
         const auto title = makeMenuLabel(motions[i], motionRoot);
@@ -416,6 +427,11 @@ void AppMenu::ShowTaskbarMenu() {
         MF_STRING |
             (getAppMain().IsViewDirectionModeYEnabled() ? MF_CHECKED : MF_UNCHECKED),
         Enum::underlyCast(Cmd::ToggleViewDirectionModeY), L"Model Rotation Y M&ode");
+    AppendMenuW(
+        menu,
+        MF_STRING |
+            (getAppMain().GetRoutine().IsReactionModeEnabled() ? MF_CHECKED : MF_UNCHECKED),
+        Enum::underlyCast(Cmd::ToggleReactionMode), L"&Look At Cursor");
     AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ResetPosition), L"&Reset Position");
     AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(
@@ -463,10 +479,12 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     const bool shouldRefreshCompactMenu =
         closeCompactMenu &&
         (cmd == Cmd::PrevModel || cmd == Cmd::NextModel || cmd == Cmd::PrevMotion ||
-         cmd == Cmd::NextMotion || cmd == Cmd::SelectModel || cmd == Cmd::SelectMotion);
+         cmd == Cmd::NextMotion || cmd == Cmd::SelectModel || cmd == Cmd::SelectMotion ||
+         cmd == Cmd::DefaultMotion);
     const bool shouldKeepCompactMenuOpen =
         closeCompactMenu &&
-        (cmd == Cmd::ToggleViewDirectionModeX || cmd == Cmd::ToggleViewDirectionModeY);
+        (cmd == Cmd::ToggleViewDirectionModeX || cmd == Cmd::ToggleViewDirectionModeY ||
+         cmd == Cmd::ToggleReactionMode);
 
     switch (cmd) {
     case Cmd::EnableMouse:
@@ -476,6 +494,9 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         break;
     case Cmd::ChangeMotion:
         PostMessageW(parentWin, YOMMD_WM_OPEN_MOTION_DIALOG, 0, 0);
+        break;
+    case Cmd::DefaultMotion:
+        getAppMain().GetRoutine().RestoreDefaultMotions();
         break;
     case Cmd::PrevModel:
     case Cmd::NextModel: {
@@ -527,6 +548,11 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         getAppMain().SetViewDirectionModeYEnabled(!getAppMain().IsViewDirectionModeYEnabled());
         updateViewDirectionModeButtons();
         break;
+    case Cmd::ToggleReactionMode:
+        getAppMain().GetRoutine().SetReactionModeEnabled(
+            !getAppMain().GetRoutine().IsReactionModeEnabled());
+        updateReactionModeButton();
+        break;
     case Cmd::ResetPosition:
         getAppMain().GetRoutine().ResetModelPosition();
         break;
@@ -570,6 +596,11 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, bool isModelSelection) {
         return;
 
     UniqueHMENU menu(CreatePopupMenu());
+    if (!isModelSelection) {
+        AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::DefaultMotion), L"No Motion");
+        AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    }
+
     for (size_t i = 0; i < paths.size(); ++i) {
         const auto label = toDisplayName(paths[i], 48);
         const auto kind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
@@ -610,6 +641,15 @@ void AppMenu::updateViewDirectionModeButtons() {
             hViewDirectionModeYButton_,
             getAppMain().IsViewDirectionModeYEnabled() ? L"Model Rotation Y: On"
                                                        : L"Model Rotation Y: Off");
+    }
+}
+
+void AppMenu::updateReactionModeButton() {
+    if (hReactionModeButton_) {
+        SetWindowTextW(
+            hReactionModeButton_,
+            getAppMain().GetRoutine().IsReactionModeEnabled() ? L"Look At Cursor: On"
+                                                              : L"Look At Cursor: Off");
     }
 }
 

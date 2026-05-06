@@ -35,6 +35,7 @@ private:
     void showSelectionMenu(HWND sourceHwnd, bool isModelSelection);
     void updateScaleControls();
     void updateViewDirectionModeButtons();
+    void updateReactionModeButton();
 
     void createTaskbar();
 
@@ -63,6 +64,7 @@ private:
             EnableMouse,
             ChangeModel,
             ChangeMotion,
+            DefaultMotion,
             PrevModel,
             NextModel,
             PrevMotion,
@@ -72,6 +74,7 @@ private:
             SetViewDirection,
             ToggleViewDirectionModeX,
             ToggleViewDirectionModeY,
+            ToggleReactionMode,
             ResetPosition,
             SelectScreen,
             HideWindow,
@@ -99,6 +102,7 @@ private:
     HWND hScaleValueLabel_;
     HWND hViewDirectionModeXButton_;
     HWND hViewDirectionModeYButton_;
+    HWND hReactionModeButton_;
     HICON hTaskbarIcon_;
     HFONT hMenuFont_;
     NOTIFYICONDATAW taskbarIconDesc_;

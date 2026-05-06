@@ -192,8 +192,11 @@ public:
     void ResetModelPosition();
     void ChangeModel(const std::filesystem::path& modelPath);
     void ChangeMotion(const std::vector<std::filesystem::path>& motionPaths);
+    void RestoreDefaultMotions();
     void SetModelRotation(float rotation);
     void SetModelViewDirection(float yaw, float pitch);
+    void SetReactionModeEnabled(bool enabled);
+    bool IsReactionModeEnabled() const;
     void SetViewDirectionModeXEnabled(bool enabled);
     void SetViewDirectionModeYEnabled(bool enabled);
     bool IsViewDirectionModeXEnabled() const;
@@ -216,6 +219,9 @@ private:
     std::optional<ImageMap::const_iterator> loadImage(const std::string& path);
     std::optional<SgImageView> getTexture(const std::string& path);
     void updateGravity();
+    void cancelReaction(bool restoreBaseDirection);
+    void triggerReaction(float yawOffset, float pitchOffset);
+    void updateReaction();
 
 private:
     struct Camera {
@@ -223,6 +229,7 @@ private:
         glm::vec3 center;
     };
 
+    Config baseConfig_;
     Config config_;
 
     ModelEmphasizer modelEmphasizer_;
@@ -230,6 +237,8 @@ private:
     UserView userView_;
 
     bool shouldTerminate_;
+    bool reactionModeEnabled_;
+    bool reactionModeSuspended_;
     bool viewDirectionModeXEnabled_;
     bool viewDirectionModeYEnabled_;
 
@@ -264,11 +273,20 @@ private:
     uint64_t timeLastFrame_;
 
     size_t motionID_;
+    std::optional<size_t> defaultMotionID_;
     bool needBridgeMotions_;
     std::vector<unsigned int> motionWeights_;
 
     std::mt19937 rand_;
     std::uniform_int_distribution<size_t> randDist_;
+
+    struct ReactionState {
+        bool active = false;
+        float baseYaw = 0.0f;
+        float basePitch = 0.0f;
+        float currentYaw = 0.0f;
+        float currentPitch = 0.0f;
+    } reactionState_;
 };
 
 #endif  // VIEWER_HPP_

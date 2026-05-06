@@ -82,7 +82,7 @@ Config Config::Parse(const std::filesystem::path& configFile) {
                     // Ensure all the required key appear in "motion" table.
                     (void)toml::find(m, "path");
 
-                    Motion c = {.disabled = false, .weight = 1};
+                    Motion c = {.disabled = false, .isDefault = false, .weight = 1};
                     for (const auto& [k, v] : m.as_table()) {
                         if (k == "path") {
                             const auto raw_path = toml::get<std::vector<std::u8string>>(v);
@@ -101,6 +101,8 @@ Config Config::Parse(const std::filesystem::path& configFile) {
                             }
                         } else if (k == "disabled") {
                             c.disabled = v.as_boolean();
+                        } else if (k == "default") {
+                            c.isDefault = v.as_boolean();
                         } else {
                             warnUnsupportedKey(k, v);
                         }

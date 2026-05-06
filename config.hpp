@@ -12,6 +12,7 @@ struct Config {
 
     struct Motion {
         bool disabled;
+        bool isDefault;
         unsigned int weight;
         std::vector<Path> paths;
     };

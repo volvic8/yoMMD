@@ -63,6 +63,10 @@ Here is the list of available configuration items.
     - ``disabled``: boolean (optional, default: false)
         When this value is ``true``, this motion is disabled.
 
+    - ``default``: boolean (optional, default: false)
+        When this value is ``true``, this motion is selected once as the initial motion at startup before weighted random selection begins.
+        If multiple enabled motions specify ``default = true``, the first one is used.
+
 - ``default-model-position``: array of floats with 2 elements (optional, default: [0, 0])
     The default MMD model position on the main window.  Values should be specified in the order of [x, y], and the coordinate system is like this::
 
