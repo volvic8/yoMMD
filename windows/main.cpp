@@ -130,6 +130,7 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 AppMain::AppMain() :
     isRunning_(true),
     mouseInteractionEnabled_(true),
+    viewDirectionModeEnabled_(false),
     mouseGestureActive_(false),
     sampleCount_(Constant::PreferredSampleCount),
     hwnd_(nullptr),
@@ -199,6 +200,15 @@ void AppMain::SetMouseInteractionEnabled(bool enabled) {
 
 bool AppMain::IsMouseInteractionEnabled() const {
     return mouseInteractionEnabled_;
+}
+
+void AppMain::SetViewDirectionModeEnabled(bool enabled) {
+    viewDirectionModeEnabled_ = enabled;
+    routine_.SetViewDirectionModeEnabled(enabled);
+}
+
+bool AppMain::IsViewDirectionModeEnabled() const {
+    return routine_.IsViewDirectionModeEnabled();
 }
 
 Routine& AppMain::GetRoutine() {
@@ -712,8 +722,21 @@ LRESULT AppMain::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
         }
         return 0;
     case AppMenu::YOMMD_WM_SET_VIEW_DIRECTION:
-        routine_.SetModelRotation(
-            static_cast<float>(wParam) * (std::numbers::pi_v<float> / 2.0f));
+        switch (wParam) {
+        case 0:
+        case 1:
+        case 2:
+        case 3:
+            routine_.SetModelViewDirection(
+                static_cast<float>(wParam) * (std::numbers::pi_v<float> / 2.0f), 0.0f);
+            break;
+        case 4:
+            routine_.SetModelViewDirection(0.0f, std::numbers::pi_v<float> / 2.0f);
+            break;
+        case 5:
+            routine_.SetModelViewDirection(0.0f, -std::numbers::pi_v<float> / 2.0f);
+            break;
+        }
         return 0;
     }
     return DefWindowProcW(hwnd_, uMsg, wParam, lParam);

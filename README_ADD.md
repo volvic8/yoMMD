@@ -61,4 +61,5 @@ path = ["../input/motion/Running.vmd"]
 
 - 実行ファイル: `release/yoMMD.exe`
 - 設定ファイル: `release/config.toml`
-- ビルドスクリプト: `build.ps1`
+- ビルドスクリプト: `.\build.ps1`
+ .\release\yoMMD.exe --config .\release\config.toml

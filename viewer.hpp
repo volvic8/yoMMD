@@ -93,6 +93,8 @@ public:
     };
     struct State {
         float rotation = 0.0f;
+        float modelYaw = 0.0f;
+        float modelPitch = 0.0f;
         float scale = 1.0f;
         glm::vec2 translation = glm::vec2(0.0f, 0.0f);
     };
@@ -105,15 +107,18 @@ public:
 
     // Get a transformer matrix of model world.
     glm::mat4 GetWorldViewMatrix() const;
+    glm::mat4 GetModelMatrix() const;
 
     void OnGestureBegin();
     void OnGestureEnd();
     void OnMouseDragged();
+    void OnViewDragged();
     void OnWheelScrolled(float delta);
     void OnGestureZoom(GesturePhase phase, float delta);
     void SetDefaultTranslation(glm::vec2 pos);
     void SetDefaultScaling(float scale);
     void SetRotation(float rotation);
+    void SetModelDirection(float yaw, float pitch);
     void ResetPosition();
     float GetScale() const;
     float GetRotation() const;
@@ -146,9 +151,12 @@ private:
         Drag,
         Zoom,
         Rotate,
+        ViewRotate,
     };
     struct Transform {
         float rotation = 0.0f;  // View rotation in radian
+        float modelYaw = 0.0f;
+        float modelPitch = 0.0f;
         float scale = 1.0f;
         glm::vec3 translation = glm::vec3(0.0f, 0.0f, 0.0f);
     };
@@ -175,6 +183,7 @@ public:
     void OnGestureBegin();
     void OnGestureEnd();
     void OnMouseDragged();
+    void OnViewDragged();
     void OnWheelScrolled(float delta);
     void OnGestureZoom(GesturePhase phase, float delta);
     float GetModelScale() const;
@@ -182,6 +191,9 @@ public:
     void ChangeModel(const std::filesystem::path& modelPath);
     void ChangeMotion(const std::vector<std::filesystem::path>& motionPaths);
     void SetModelRotation(float rotation);
+    void SetModelViewDirection(float yaw, float pitch);
+    void SetViewDirectionModeEnabled(bool enabled);
+    bool IsViewDirectionModeEnabled() const;
     void SetModelScale(float scale);
     glm::vec2 GetModelMenuAnchorPosition(const glm::vec2& windowSize) const;
     glm::vec4 GetModelInteractionBounds(const glm::vec2& windowSize) const;
@@ -214,6 +226,7 @@ private:
     UserView userView_;
 
     bool shouldTerminate_;
+    bool viewDirectionModeEnabled_;
 
     const sg_pass_action passAction_;
     sg_shader shaderMMD_;

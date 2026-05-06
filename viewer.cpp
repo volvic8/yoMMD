@@ -1,4 +1,5 @@
 #include "viewer.hpp"
+#include <algorithm>
 #include <ctime>
 #include <filesystem>
 #include <functional>
@@ -285,6 +286,13 @@ glm::mat4 UserView::GetWorldViewMatrix() const {
     return m;
 }
 
+glm::mat4 UserView::GetModelMatrix() const {
+    glm::mat4 m(1.0f);
+    m = glm::rotate(std::move(m), transform_.modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
+    m = glm::rotate(std::move(m), transform_.modelPitch, glm::vec3(1.0f, 0.0f, 0.0f));
+    return m;
+}
+
 void UserView::OnGestureBegin() {
     actionHelper_.action = Action::None;
 }
@@ -294,6 +302,11 @@ void UserView::OnGestureEnd() {
 }
 
 void UserView::OnMouseDragged() {
+    if (Keyboard::IsKeyPressed(Keycode::Shift)) {
+        OnViewDragged();
+        return;
+    }
+
     if (actionHelper_.action != Action::Drag) {
         actionHelper_ = {
             .action = Action::Drag,
@@ -318,6 +331,26 @@ void UserView::OnMouseDragged() {
     // Note that "toWorldCoord" shouldn't be used here.
     delta = 2.0f * delta / Context::getWindowSize();
     transform_.translation = actionHelper_.firstTransform.translation + toVec3(delta, 0.0f);
+}
+
+void UserView::OnViewDragged() {
+    if (actionHelper_.action != Action::ViewRotate) {
+        actionHelper_ = {
+            .action = Action::ViewRotate,
+            .refPoint = Context::getMousePosition(),
+            .firstTransform = transform_,
+        };
+    }
+
+    constexpr float maxPitch = std::numbers::pi_v<float> * 0.49f;
+    const auto delta = Context::getMousePosition() - actionHelper_.refPoint;
+    transform_.modelYaw =
+        actionHelper_.firstTransform.modelYaw +
+        delta.x / Context::getWindowSize().x * std::numbers::pi_v<float>;
+    transform_.modelPitch = std::clamp(
+        actionHelper_.firstTransform.modelPitch +
+            delta.y / Context::getWindowSize().y * std::numbers::pi_v<float>,
+        -maxPitch, maxPitch);
 }
 
 void UserView::OnWheelScrolled(float delta) {
@@ -362,6 +395,13 @@ void UserView::SetRotation(float rotation) {
         callback_.OnRotationChanged();
 }
 
+void UserView::SetModelDirection(float yaw, float pitch) {
+    transform_.modelYaw = yaw;
+    transform_.modelPitch = pitch;
+    defaultTransform_.modelYaw = yaw;
+    defaultTransform_.modelPitch = pitch;
+}
+
 void UserView::ResetPosition() {
     transform_ = defaultTransform_;
 }
@@ -381,6 +421,8 @@ glm::vec2 UserView::GetTranslation() const {
 UserView::State UserView::GetState() const {
     return State{
         .rotation = transform_.rotation,
+        .modelYaw = transform_.modelYaw,
+        .modelPitch = transform_.modelPitch,
         .scale = transform_.scale,
         .translation = GetTranslation(),
     };
@@ -389,6 +431,8 @@ UserView::State UserView::GetState() const {
 void UserView::RestoreState(const State& state) {
     const bool rotationChanged = transform_.rotation != state.rotation;
     transform_.rotation = state.rotation;
+    transform_.modelYaw = state.modelYaw;
+    transform_.modelPitch = state.modelPitch;
     transform_.scale = state.scale;
     transform_.translation = toVec3(state.translation, 0.0f);
     actionHelper_.action = Action::None;
@@ -463,6 +507,7 @@ glm::vec2 UserView::toWindowCoord(const glm::vec2& src, const glm::vec2& transla
 
 Routine::Routine() :
     shouldTerminate_(false),
+    viewDirectionModeEnabled_(false),
     passAction_(
         {.colors = {{.load_action = SG_LOADACTION_CLEAR, .clear_value = {0, 0, 0, 0}}}}),
     binds_({}),
@@ -841,7 +886,7 @@ void Routine::Draw() {
     const auto model = mmd_.GetModel();
 
     const auto userView = userView_.GetViewportMatrix();
-    const auto world = glm::mat4(1.0f);
+    const auto world = userView_.GetModelMatrix();
     const auto wv = userView * viewMatrix_ * world;
     const auto wvp = userView * projectionMatrix_ * viewMatrix_ * world;
 
@@ -1033,7 +1078,15 @@ void Routine::OnGestureEnd() {
 }
 
 void Routine::OnMouseDragged() {
+    if (viewDirectionModeEnabled_) {
+        OnViewDragged();
+        return;
+    }
     userView_.OnMouseDragged();
+}
+
+void Routine::OnViewDragged() {
+    userView_.OnViewDragged();
 }
 
 void Routine::OnWheelScrolled(float delta) {
@@ -1074,6 +1127,18 @@ void Routine::ChangeMotion(const std::vector<std::filesystem::path>& motionPaths
 
 void Routine::SetModelRotation(float rotation) {
     userView_.SetRotation(rotation);
+}
+
+void Routine::SetModelViewDirection(float yaw, float pitch) {
+    userView_.SetModelDirection(yaw, pitch);
+}
+
+void Routine::SetViewDirectionModeEnabled(bool enabled) {
+    viewDirectionModeEnabled_ = enabled;
+}
+
+bool Routine::IsViewDirectionModeEnabled() const {
+    return viewDirectionModeEnabled_;
 }
 
 void Routine::SetModelScale(float scale) {

@@ -7,6 +7,7 @@ Toolbar menu
 yoMMD provides a menu on toolbar with icon |menuicon|.  Menu items under the menu are:
 
 - Enable Mouse
+- Model Rotation Mode
 - Reset Position
 - Select Screen
 - Hide Window
@@ -25,6 +26,13 @@ Reset Position
 ==============
 
 Reset model's position and scale to the initial state.
+
+Model Rotation Mode
+===================
+
+Switch mouse dragging between moving the model and rotating the model itself.
+When model rotation mode is enabled, mouse drag rotates the model so you can
+check its side, back, top, and bottom.
 
 Select Screen
 =============
@@ -51,6 +59,12 @@ Mouse drag
 ==========
 
 Change model position.
+
+Shift key + mouse drag / Model Rotation Mode mouse drag
+=======================================================
+
+Rotate the model.  Drag horizontally to see the model from the side or back,
+and drag vertically to check it from above or below.
 
 Mouse wheel scroll
 ==================

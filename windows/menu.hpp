@@ -69,6 +69,7 @@ private:
             SelectModel,
             SelectMotion,
             SetViewDirection,
+            ToggleViewDirectionMode,
             ResetPosition,
             SelectScreen,
             HideWindow,

@@ -175,7 +175,7 @@ void AppMenu::ShowMenu() {
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 280;
+    int height = 314;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -293,6 +293,12 @@ void AppMenu::ShowMenu() {
     y += btnH + gap;
 
     makeButton(
+        getAppMain().IsViewDirectionModeEnabled() ? L"Model Rotation Mode: On"
+                                                  : L"Model Rotation Mode: Off",
+        margin, y, width - margin * 2, btnH, Enum::underlyCast(Cmd::ToggleViewDirectionMode));
+    y += btnH + gap;
+
+    makeButton(
         L"Reset Position", margin, y, width - margin * 2, btnH,
         Enum::underlyCast(Cmd::ResetPosition));
     y += btnH + gap;
@@ -382,6 +388,8 @@ void AppMenu::ShowTaskbarMenu() {
     AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 1), L"&Right");
     AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 2), L"&Back");
     AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 3), L"&Left");
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 4), L"&Top");
+    AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 5), L"&Bottom");
 
     UniqueHMENU menu(CreatePopupMenu());
     AppendMenuW(
@@ -392,6 +400,9 @@ void AppMenu::ShowTaskbarMenu() {
     AppendMenuW(
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewDirectionMenu.GetRawHandler()),
         L"View &Direction");
+    AppendMenuW(
+        menu, MF_STRING | (getAppMain().IsViewDirectionModeEnabled() ? MF_CHECKED : MF_UNCHECKED),
+        Enum::underlyCast(Cmd::ToggleViewDirectionMode), L"Model Rotation &Mode");
     AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ResetPosition), L"&Reset Position");
     AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(
@@ -491,6 +502,9 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         PostMessageW(
             parentWin, YOMMD_WM_SET_VIEW_DIRECTION,
             Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)), 0);
+        break;
+    case Cmd::ToggleViewDirectionMode:
+        getAppMain().SetViewDirectionModeEnabled(!getAppMain().IsViewDirectionModeEnabled());
         break;
     case Cmd::ResetPosition:
         getAppMain().GetRoutine().ResetModelPosition();
