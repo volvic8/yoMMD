@@ -34,6 +34,7 @@ private:
     void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
     void showSelectionMenu(HWND sourceHwnd, bool isModelSelection);
     void updateScaleControls();
+    void updateViewDirectionModeButtons();
 
     void createTaskbar();
 
@@ -96,6 +97,8 @@ private:
     HWND hMenuWindow_;
     HWND hScaleTrackbar_;
     HWND hScaleValueLabel_;
+    HWND hViewDirectionModeXButton_;
+    HWND hViewDirectionModeYButton_;
     HICON hTaskbarIcon_;
     HFONT hMenuFont_;
     NOTIFYICONDATAW taskbarIconDesc_;

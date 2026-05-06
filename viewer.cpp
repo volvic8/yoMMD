@@ -346,6 +346,7 @@ void UserView::OnViewDragged(bool adjustYaw, bool adjustPitch) {
 
     constexpr float maxPitch = std::numbers::pi_v<float> * 0.49f;
     constexpr float horizontalSensitivity = 5.0f;
+    constexpr float verticalSensitivity = 4.0f;
     const auto delta = Context::getMousePosition() - actionHelper_.refPoint;
     if (adjustYaw) {
         transform_.modelYaw =
@@ -358,7 +359,8 @@ void UserView::OnViewDragged(bool adjustYaw, bool adjustPitch) {
     if (adjustPitch) {
         transform_.modelPitch = std::clamp(
             actionHelper_.firstTransform.modelPitch +
-                -delta.y / Context::getWindowSize().y * std::numbers::pi_v<float>,
+                -delta.y / Context::getWindowSize().y * std::numbers::pi_v<float> *
+                    verticalSensitivity,
             -maxPitch, maxPitch);
     } else {
         transform_.modelPitch = actionHelper_.firstTransform.modelPitch;

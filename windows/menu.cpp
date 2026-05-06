@@ -102,6 +102,8 @@ AppMenu::AppMenu() :
     hMenuWindow_(nullptr),
     hScaleTrackbar_(nullptr),
     hScaleValueLabel_(nullptr),
+    hViewDirectionModeXButton_(nullptr),
+    hViewDirectionModeYButton_(nullptr),
     hTaskbarIcon_(nullptr),
     hMenuFont_(nullptr),
     isMenuOpened_(false) {}
@@ -153,6 +155,8 @@ void AppMenu::destroyMenuWindow() {
     }
     hScaleTrackbar_ = nullptr;
     hScaleValueLabel_ = nullptr;
+    hViewDirectionModeXButton_ = nullptr;
+    hViewDirectionModeYButton_ = nullptr;
     isMenuOpened_ = false;
 }
 
@@ -292,12 +296,12 @@ void AppMenu::ShowMenu() {
     updateScaleControls();
     y += btnH + gap;
 
-    makeButton(
+    hViewDirectionModeXButton_ = makeButton(
         getAppMain().IsViewDirectionModeXEnabled() ? L"Model Rotation X: On"
                                                    : L"Model Rotation X: Off",
         margin, y, (width - margin * 2 - gap) / 2, btnH,
         Enum::underlyCast(Cmd::ToggleViewDirectionModeX));
-    makeButton(
+    hViewDirectionModeYButton_ = makeButton(
         getAppMain().IsViewDirectionModeYEnabled() ? L"Model Rotation Y: On"
                                                    : L"Model Rotation Y: Off",
         margin + (width - margin * 2 - gap) / 2 + gap, y, (width - margin * 2 - gap) / 2, btnH,
@@ -464,6 +468,9 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         closeCompactMenu &&
         (cmd == Cmd::PrevModel || cmd == Cmd::NextModel || cmd == Cmd::PrevMotion ||
          cmd == Cmd::NextMotion || cmd == Cmd::SelectModel || cmd == Cmd::SelectMotion);
+    const bool shouldKeepCompactMenuOpen =
+        closeCompactMenu &&
+        (cmd == Cmd::ToggleViewDirectionModeX || cmd == Cmd::ToggleViewDirectionModeY);
 
     switch (cmd) {
     case Cmd::EnableMouse:
@@ -518,9 +525,11 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         break;
     case Cmd::ToggleViewDirectionModeX:
         getAppMain().SetViewDirectionModeXEnabled(!getAppMain().IsViewDirectionModeXEnabled());
+        updateViewDirectionModeButtons();
         break;
     case Cmd::ToggleViewDirectionModeY:
         getAppMain().SetViewDirectionModeYEnabled(!getAppMain().IsViewDirectionModeYEnabled());
+        updateViewDirectionModeButtons();
         break;
     case Cmd::ResetPosition:
         getAppMain().GetRoutine().ResetModelPosition();
@@ -546,7 +555,7 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     if (shouldRefreshCompactMenu) {
         destroyMenuWindow();
         ShowMenu();
-    } else if (closeCompactMenu) {
+    } else if (closeCompactMenu && !shouldKeepCompactMenuOpen) {
         destroyMenuWindow();
     }
 }
@@ -591,6 +600,21 @@ void AppMenu::updateScaleControls() {
     wchar_t label[32] = {};
     swprintf_s(label, L"x%.2f", scale);
     SetWindowTextW(hScaleValueLabel_, label);
+}
+
+void AppMenu::updateViewDirectionModeButtons() {
+    if (hViewDirectionModeXButton_) {
+        SetWindowTextW(
+            hViewDirectionModeXButton_,
+            getAppMain().IsViewDirectionModeXEnabled() ? L"Model Rotation X: On"
+                                                       : L"Model Rotation X: Off");
+    }
+    if (hViewDirectionModeYButton_) {
+        SetWindowTextW(
+            hViewDirectionModeYButton_,
+            getAppMain().IsViewDirectionModeYEnabled() ? L"Model Rotation Y: On"
+                                                       : L"Model Rotation Y: Off");
+    }
 }
 
 LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
