@@ -28,11 +28,17 @@ public:
     static constexpr UINT YOMMD_WM_ADJUST_SCALE = WM_APP + 7;
 
 private:
+    enum class SelectionMenuKind {
+        Model,
+        Motion,
+        Expression,
+    };
+
     static LRESULT CALLBACK windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void destroyMenuWindow();
     void handleCommand(UINT_PTR cmd, HWND sourceHwnd);
     void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
-    void showSelectionMenu(HWND sourceHwnd, bool isModelSelection);
+    void showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind);
     void updateScaleControls();
     void updateViewDirectionModeButtons();
     void updateReactionModeButton();
@@ -65,12 +71,15 @@ private:
             ChangeModel,
             ChangeMotion,
             DefaultMotion,
+            ChangeExpression,
             PrevModel,
             NextModel,
             PrevMotion,
             NextMotion,
             SelectModel,
             SelectMotion,
+            ClearExpression,
+            SelectExpression,
             SetViewDirection,
             ToggleViewDirectionModeX,
             ToggleViewDirectionModeY,

@@ -96,6 +96,10 @@ std::wstring makeMenuLabel(
     const auto rel = fs::relative(path, root, ec);
     return (ec ? path.filename() : rel).wstring();
 }
+
+std::wstring utf8ToWide(const std::string& text) {
+    return std::filesystem::path(String::tou8(text)).wstring();
+}
 }  // namespace
 
 AppMenu::AppMenu() :
@@ -181,7 +185,7 @@ void AppMenu::ShowMenu() {
     int y = margin;
 
     const bool hasMultiScreen = getAllMonitorHandles().size() > 1;
-    int height = 308;
+    int height = 342;
     if (hasMultiScreen) {
         height += rowH + 2 + btnH + gap;
     }
@@ -280,6 +284,15 @@ void AppMenu::ShowMenu() {
         Enum::underlyCast(Cmd::NextMotion));
     y += btnH + gap;
 
+    std::wstring expressionName = L"Expression: (none)";
+    if (const auto& expression = getAppMain().GetRoutine().GetExpression(); expression.has_value()) {
+        expressionName = makeButtonLabel(L"Expression", std::filesystem::path(String::tou8(*expression)), 23);
+    }
+    makeButton(
+        expressionName, margin, y, width - margin * 2, btnH,
+        Enum::underlyCast(Cmd::ChangeExpression));
+    y += btnH + gap;
+
     makeStatic(L"Scale", margin, y, 64, rowH, SS_LEFT);
     hScaleValueLabel_ = makeStatic(L"", width - margin - 72, y, 72, rowH, SS_RIGHT);
     y += rowH + 2;
@@ -376,6 +389,7 @@ void AppMenu::ShowTaskbarMenu() {
     const auto motionRoot = Path::makeAbsolute("input/motion", Path::getWorkingDirectory());
     const auto& models = getAppMain().GetAvailableModels();
     const auto& motions = getAppMain().GetAvailableMotions();
+    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
 
     UniqueHMENU modelsMenu(CreatePopupMenu());
     for (size_t i = 0; i < models.size(); ++i) {
@@ -400,6 +414,17 @@ void AppMenu::ShowTaskbarMenu() {
         AppendMenuW(motionsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(motionsMenu, MF_STRING, Enum::underlyCast(Cmd::ChangeMotion), L"&Other...");
 
+    UniqueHMENU expressionsMenu(CreatePopupMenu());
+    AppendMenuW(
+        expressionsMenu, MF_STRING, Enum::underlyCast(Cmd::ClearExpression), L"&No Expression");
+    if (!expressions.empty())
+        AppendMenuW(expressionsMenu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+    for (size_t i = 0; i < expressions.size(); ++i) {
+        const auto op = Cmd::Combine(Cmd::SelectExpression, static_cast<Cmd::UnderlyingType>(i));
+        const auto title = utf8ToWide(expressions[i]);
+        AppendMenuW(expressionsMenu, MF_STRING, op, title.c_str());
+    }
+
     UniqueHMENU viewDirectionMenu(CreatePopupMenu());
     AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 0), L"&Front");
     AppendMenuW(viewDirectionMenu, MF_STRING, Cmd::Combine(Cmd::SetViewDirection, 1), L"&Right");
@@ -414,6 +439,9 @@ void AppMenu::ShowTaskbarMenu() {
     AppendMenuW(
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(motionsMenu.GetRawHandler()),
         L"Change M&otion");
+    AppendMenuW(
+        menu, MF_POPUP, reinterpret_cast<UINT_PTR>(expressionsMenu.GetRawHandler()),
+        L"Change E&xpression");
     AppendMenuW(
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewDirectionMenu.GetRawHandler()),
         L"View &Direction");
@@ -462,11 +490,15 @@ bool AppMenu::IsMenuOpened() const {
 void AppMenu::handleCommand(UINT_PTR op, HWND sourceHwnd) {
     const auto cmd = Cmd::GetCmd(static_cast<Cmd::UnderlyingType>(op));
     if (cmd == Cmd::ChangeModel) {
-        showSelectionMenu(sourceHwnd, true);
+        showSelectionMenu(sourceHwnd, SelectionMenuKind::Model);
         return;
     }
     if (cmd == Cmd::ChangeMotion) {
-        showSelectionMenu(sourceHwnd, false);
+        showSelectionMenu(sourceHwnd, SelectionMenuKind::Motion);
+        return;
+    }
+    if (cmd == Cmd::ChangeExpression) {
+        showSelectionMenu(sourceHwnd, SelectionMenuKind::Expression);
         return;
     }
     executeCommand(op, true);
@@ -480,7 +512,8 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         closeCompactMenu &&
         (cmd == Cmd::PrevModel || cmd == Cmd::NextModel || cmd == Cmd::PrevMotion ||
          cmd == Cmd::NextMotion || cmd == Cmd::SelectModel || cmd == Cmd::SelectMotion ||
-         cmd == Cmd::DefaultMotion);
+         cmd == Cmd::DefaultMotion || cmd == Cmd::ClearExpression ||
+         cmd == Cmd::SelectExpression);
     const bool shouldKeepCompactMenuOpen =
         closeCompactMenu &&
         (cmd == Cmd::ToggleViewDirectionModeX || cmd == Cmd::ToggleViewDirectionModeY ||
@@ -494,6 +527,8 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
         break;
     case Cmd::ChangeMotion:
         PostMessageW(parentWin, YOMMD_WM_OPEN_MOTION_DIALOG, 0, 0);
+        break;
+    case Cmd::ChangeExpression:
         break;
     case Cmd::DefaultMotion:
         getAppMain().GetRoutine().RestoreDefaultMotions();
@@ -535,6 +570,17 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
             parentWin, YOMMD_WM_SELECT_MOTION,
             Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)), 0);
         break;
+    case Cmd::ClearExpression:
+        getAppMain().GetRoutine().ClearExpression();
+        break;
+    case Cmd::SelectExpression: {
+        const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
+        const auto index = static_cast<size_t>(Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)));
+        if (index < expressions.size()) {
+            getAppMain().GetRoutine().SetExpression(expressions[index]);
+        }
+        break;
+    }
     case Cmd::SetViewDirection:
         PostMessageW(
             parentWin, YOMMD_WM_SET_VIEW_DIRECTION,
@@ -582,13 +628,17 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
     }
 }
 
-void AppMenu::showSelectionMenu(HWND sourceHwnd, bool isModelSelection) {
+void AppMenu::showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind) {
     if (!sourceHwnd)
         return;
 
+    const bool isModelSelection = kind == SelectionMenuKind::Model;
+    const bool isMotionSelection = kind == SelectionMenuKind::Motion;
     const auto& paths =
         isModelSelection ? getAppMain().GetAvailableModels() : getAppMain().GetAvailableMotions();
-    if (paths.empty())
+    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
+    if ((kind == SelectionMenuKind::Expression && expressions.empty()) ||
+        (kind != SelectionMenuKind::Expression && paths.empty()))
         return;
 
     RECT buttonRect = {};
@@ -596,17 +646,29 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, bool isModelSelection) {
         return;
 
     UniqueHMENU menu(CreatePopupMenu());
-    if (!isModelSelection) {
+    if (isMotionSelection) {
         AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::DefaultMotion), L"No Motion");
         AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     }
 
-    for (size_t i = 0; i < paths.size(); ++i) {
-        const auto label = toDisplayName(paths[i], 48);
-        const auto kind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
-        AppendMenuW(
-            menu, MF_STRING,
-            Cmd::Combine(kind, static_cast<Cmd::UnderlyingType>(i)), label.c_str());
+    if (kind == SelectionMenuKind::Expression) {
+        AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ClearExpression), L"No Expression");
+        AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
+        for (size_t i = 0; i < expressions.size(); ++i) {
+            const auto label = utf8ToWide(expressions[i]);
+            AppendMenuW(
+                menu, MF_STRING,
+                Cmd::Combine(Cmd::SelectExpression, static_cast<Cmd::UnderlyingType>(i)),
+                label.c_str());
+        }
+    } else {
+        for (size_t i = 0; i < paths.size(); ++i) {
+            const auto label = toDisplayName(paths[i], 48);
+            const auto selectKind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
+            AppendMenuW(
+                menu, MF_STRING,
+                Cmd::Combine(selectKind, static_cast<Cmd::UnderlyingType>(i)), label.c_str());
+        }
     }
 
     SetForegroundWindow(hMenuWindow_);

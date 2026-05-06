@@ -14,7 +14,9 @@
 #include "Saba/Model/MMD/MMDMaterial.h"
 #include "Saba/Model/MMD/MMDModel.h"
 #include "Saba/Model/MMD/MMDPhysics.h"
+#include "Saba/Model/MMD/PMDFile.h"
 #include "Saba/Model/MMD/PMDModel.h"
+#include "Saba/Model/MMD/PMXFile.h"
 #include "Saba/Model/MMD/PMXModel.h"
 #include "Saba/Model/MMD/VMDAnimation.h"
 #include "Saba/Model/MMD/VMDCameraAnimation.h"
@@ -50,6 +52,39 @@ inline glm::vec2 toVec2(glm::vec3 v) {
 
 inline glm::vec3 toVec3(glm::vec2 xy, decltype(xy)::value_type z) {
     return glm::vec3(xy.x, xy.y, z);
+}
+
+std::vector<std::string> getExpressionNamesFromModelFile(const std::filesystem::path& modelPath) {
+    std::vector<std::string> expressions;
+    const auto ext = modelPath.extension();
+
+    if (ext == ".pmx") {
+        saba::PMXFile pmx;
+        if (!saba::ReadPMXFile(&pmx, modelPath.string().c_str()))
+            return expressions;
+
+        expressions.reserve(pmx.m_morphs.size());
+        for (const auto& morph : pmx.m_morphs) {
+            if (morph.m_controlPanel >= 1 && morph.m_controlPanel <= 4) {
+                expressions.push_back(morph.m_name);
+            }
+        }
+    } else if (ext == ".pmd") {
+        saba::PMDFile pmd;
+        if (!saba::ReadPMDFile(&pmd, modelPath.string().c_str()))
+            return expressions;
+
+        expressions.reserve(pmd.m_morphs.size());
+        for (const auto& morph : pmd.m_morphs) {
+            if (morph.m_morphType != saba::PMDMorph::Base) {
+                expressions.push_back(morph.m_morphName.ToUtf8String());
+            }
+        }
+    }
+
+    std::sort(expressions.begin(), expressions.end());
+    expressions.erase(std::unique(expressions.begin(), expressions.end()), expressions.end());
+    return expressions;
 }
 
 }  // namespace
@@ -536,6 +571,7 @@ Routine::Routine() :
     timeLastFrame_(0),
     motionID_(0),
     defaultMotionID_(std::nullopt),
+    selectedExpressionName_(std::nullopt),
     needBridgeMotions_(false),
     rand_(static_cast<int>(std::time(nullptr))) {
     userView_.SetCallback({
@@ -575,6 +611,7 @@ void Routine::initScene() {
     defaultCamera_.eye = config_.defaultCameraPosition;
     defaultCamera_.center = config_.defaultGazePosition;
     mmd_.LoadModel(config_.model, resourcePath);
+    availableExpressionNames_ = getExpressionNamesFromModelFile(config_.model);
     {
         glm::vec3 modelPivot(0.0f, 0.0f, 0.0f);
         const auto model = mmd_.GetModel();
@@ -899,6 +936,7 @@ void Routine::Update() {
         } else {
             model->UpdateAllAnimation(vmdAnim.get(), vmdFrame, elapsedTime);
         }
+        applyExpressionMorph();
         model->EndAnimation();
 
         model->Update();
@@ -933,19 +971,23 @@ void Routine::Update() {
         projectionMatrix_ = glm::perspectiveFovRH(
             glm::radians(30.0f), static_cast<float>(size.x), static_cast<float>(size.y), 1.0f,
             10000.0f);
+        model->BeginAnimation();
+        applyExpressionMorph();
+        model->EndAnimation();
+        model->Update();
         sg_update_buffer(
             posVB_, sg_range{
-                        .ptr = model->GetPositions(),
+                        .ptr = model->GetUpdatePositions(),
                         .size = vertCount * sizeof(glm::vec3),
                     });
         sg_update_buffer(
             normVB_, sg_range{
-                         .ptr = model->GetNormals(),
+                         .ptr = model->GetUpdateNormals(),
                          .size = vertCount * sizeof(glm::vec3),
                      });
         sg_update_buffer(
             uvVB_, sg_range{
-                       .ptr = model->GetUVs(),
+                       .ptr = model->GetUpdateUVs(),
                        .size = vertCount * sizeof(glm::vec2),
                    });
     }
@@ -1090,6 +1132,7 @@ void Routine::destroyScene() {
 
     motionID_ = 0;
     defaultMotionID_.reset();
+    availableExpressionNames_.clear();
     needBridgeMotions_ = false;
     motionWeights_.clear();
     induces_.clear();
@@ -1213,6 +1256,39 @@ void Routine::RestoreDefaultMotions() {
     Config nextConfig = config_;
     nextConfig.motions.clear();
     reloadScene(nextConfig);
+}
+
+std::vector<std::string> Routine::GetAvailableExpressions() const {
+    return availableExpressionNames_;
+}
+
+void Routine::SetExpression(const std::string& expressionName) {
+    if (std::find(
+            availableExpressionNames_.begin(), availableExpressionNames_.end(), expressionName) ==
+        availableExpressionNames_.end()) {
+        return;
+    }
+    selectedExpressionName_ = expressionName;
+}
+
+void Routine::ClearExpression() {
+    selectedExpressionName_.reset();
+    if (!mmd_.IsModelLoaded())
+        return;
+
+    auto model = mmd_.GetModel();
+    auto* morphManager = model->GetMorphManager();
+    const auto morphCount = morphManager->GetMorphCount();
+    for (size_t i = 0; i < morphCount; ++i) {
+        if (auto* morph = morphManager->GetMorph(i)) {
+            morph->SetWeight(0.0f);
+        }
+    }
+    model->UpdateMorphAnimation();
+}
+
+const std::optional<std::string>& Routine::GetExpression() const {
+    return selectedExpressionName_;
 }
 
 void Routine::SetModelRotation(float rotation) {
@@ -1452,4 +1528,28 @@ void Routine::updateReaction() {
     triggerReaction(
         reactionState_.currentYaw - reactionState_.baseYaw,
         reactionState_.currentPitch - reactionState_.basePitch);
+}
+
+void Routine::applyExpressionMorph() {
+    if (!selectedExpressionName_.has_value() || !mmd_.IsModelLoaded())
+        return;
+
+    auto model = mmd_.GetModel();
+    auto* morphManager = model->GetMorphManager();
+    const auto morphCount = morphManager->GetMorphCount();
+    bool found = false;
+    for (size_t i = 0; i < morphCount; ++i) {
+        auto* morph = morphManager->GetMorph(i);
+        if (!morph)
+            continue;
+        const bool isSelected = morph->GetName() == *selectedExpressionName_;
+        morph->SetWeight(isSelected ? 1.0f : 0.0f);
+        found = found || isSelected;
+    }
+
+    if (!found) {
+        selectedExpressionName_.reset();
+        return;
+    }
+    model->UpdateMorphAnimation();
 }

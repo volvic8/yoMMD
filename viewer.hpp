@@ -193,6 +193,10 @@ public:
     void ChangeModel(const std::filesystem::path& modelPath);
     void ChangeMotion(const std::vector<std::filesystem::path>& motionPaths);
     void RestoreDefaultMotions();
+    std::vector<std::string> GetAvailableExpressions() const;
+    void SetExpression(const std::string& expressionName);
+    void ClearExpression();
+    const std::optional<std::string>& GetExpression() const;
     void SetModelRotation(float rotation);
     void SetModelViewDirection(float yaw, float pitch);
     void SetReactionModeEnabled(bool enabled);
@@ -222,6 +226,7 @@ private:
     void cancelReaction(bool restoreBaseDirection);
     void triggerReaction(float yawOffset, float pitchOffset);
     void updateReaction();
+    void applyExpressionMorph();
 
 private:
     struct Camera {
@@ -274,6 +279,8 @@ private:
 
     size_t motionID_;
     std::optional<size_t> defaultMotionID_;
+    std::vector<std::string> availableExpressionNames_;
+    std::optional<std::string> selectedExpressionName_;
     bool needBridgeMotions_;
     std::vector<unsigned int> motionWeights_;
 
