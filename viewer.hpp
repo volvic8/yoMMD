@@ -119,6 +119,7 @@ public:
     void SetDefaultScaling(float scale);
     void SetRotation(float rotation);
     void SetModelDirection(float yaw, float pitch);
+    void SetModelPivot(glm::vec3 pivot);
     void ResetPosition();
     float GetScale() const;
     float GetRotation() const;
@@ -168,6 +169,7 @@ private:
 
     Transform transform_, defaultTransform_;
     ActionHelper actionHelper_;
+    glm::vec3 modelPivot_ = glm::vec3(0.0f, 0.0f, 0.0f);
 
     Callback callback_;
 };

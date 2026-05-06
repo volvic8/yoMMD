@@ -288,8 +288,10 @@ glm::mat4 UserView::GetWorldViewMatrix() const {
 
 glm::mat4 UserView::GetModelMatrix() const {
     glm::mat4 m(1.0f);
+    m = glm::translate(std::move(m), modelPivot_);
     m = glm::rotate(std::move(m), transform_.modelYaw, glm::vec3(0.0f, 1.0f, 0.0f));
     m = glm::rotate(std::move(m), transform_.modelPitch, glm::vec3(1.0f, 0.0f, 0.0f));
+    m = glm::translate(std::move(m), -modelPivot_);
     return m;
 }
 
@@ -410,6 +412,10 @@ void UserView::SetModelDirection(float yaw, float pitch) {
     transform_.modelPitch = pitch;
     defaultTransform_.modelYaw = yaw;
     defaultTransform_.modelPitch = pitch;
+}
+
+void UserView::SetModelPivot(glm::vec3 pivot) {
+    modelPivot_ = pivot;
 }
 
 void UserView::ResetPosition() {
@@ -564,6 +570,39 @@ void Routine::initScene() {
     defaultCamera_.eye = config_.defaultCameraPosition;
     defaultCamera_.center = config_.defaultGazePosition;
     mmd_.LoadModel(config_.model, resourcePath);
+    {
+        glm::vec3 modelPivot(0.0f, 0.0f, 0.0f);
+        const auto model = mmd_.GetModel();
+        const auto vertCount = model->GetVertexCount();
+        const auto *positions = model->GetPositions();
+        if (positions && vertCount > 0) {
+            glm::vec3 sum(0.0f, 0.0f, 0.0f);
+            glm::vec3 bboxMin = positions[0];
+            glm::vec3 bboxMax = positions[0];
+            for (size_t i = 0; i < vertCount; ++i) {
+                sum += positions[i];
+                bboxMin = glm::min(bboxMin, positions[i]);
+                bboxMax = glm::max(bboxMax, positions[i]);
+            }
+            modelPivot = sum / static_cast<float>(vertCount);
+            // Keep X/Z on centroid, but bias Y upward to avoid "foot pivot" feel.
+            const float height = bboxMax.y - bboxMin.y;
+            modelPivot.y = bboxMin.y + height * 0.62f;
+        } else {
+            glm::vec3 bboxMin(0.0f, 0.0f, 0.0f);
+            glm::vec3 bboxMax(0.0f, 0.0f, 0.0f);
+            if (auto pmx = std::dynamic_pointer_cast<saba::PMXModel>(model)) {
+                bboxMin = pmx->GetBBoxMin();
+                bboxMax = pmx->GetBBoxMax();
+            } else if (auto pmd = std::dynamic_pointer_cast<saba::PMDModel>(model)) {
+                bboxMin = pmd->GetBBoxMin();
+                bboxMax = pmd->GetBBoxMax();
+            }
+            modelPivot = (bboxMin + bboxMax) * 0.5f;
+            modelPivot.y = bboxMin.y + (bboxMax.y - bboxMin.y) * 0.62f;
+        }
+        userView_.SetModelPivot(modelPivot);
+    }
 
     for (const auto& motion : config_.motions) {
         if (!motion.disabled) {
