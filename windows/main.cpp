@@ -378,7 +378,7 @@ void AppMain::createMenuButtonWindow() {
 
     menuButtonHwnd_ = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, menuButtonClassName_,
-        L"yoMMD Menu Button", WS_POPUP | WS_VISIBLE, 0, 0, iconSize, iconSize, hwnd_, nullptr,
+        L"yoMMD Menu Button", WS_POPUP, 0, 0, iconSize, iconSize, hwnd_, nullptr,
         GetModuleHandleW(nullptr), hwnd_);
     if (!menuButtonHwnd_) {
         Err::Log("Failed to create menu button window.");
@@ -407,28 +407,32 @@ void AppMain::repositionMenuButtonWindow() {
     if (!menuButtonHwnd_ || !hwnd_)
         return;
 
-    RECT mainRect = {};
-    if (!GetWindowRect(hwnd_, &mainRect))
-        return;
-
     RECT buttonRect = {};
     if (!GetWindowRect(menuButtonHwnd_, &buttonRect))
         return;
 
-    const auto winSize = GetWindowSize();
-    const auto anchor = routine_.GetModelMenuAnchorPosition(winSize);
     const int width = buttonRect.right - buttonRect.left;
     const int height = buttonRect.bottom - buttonRect.top;
     const int margin = 8;
-    int x = mainRect.left + static_cast<int>(anchor.x) - width / 2;
-    int y = mainRect.bottom - static_cast<int>(anchor.y) - height / 2;
-    x = std::clamp(
-        x, static_cast<int>(mainRect.left) + margin,
-        static_cast<int>(mainRect.right) - width - margin);
-    y = std::clamp(
-        y, static_cast<int>(mainRect.top) + margin,
-        static_cast<int>(mainRect.bottom) - height - margin);
-    SetWindowPos(menuButtonHwnd_, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    if (GetWindowLongPtrW(hwnd_, GWL_STYLE) & WS_VISIBLE) {
+        ShowWindow(menuButtonHwnd_, SW_HIDE);
+        return;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO monitorInfo = {.cbSize = sizeof(monitorInfo)};
+    RECT workArea = {};
+    if (GetMonitorInfoW(monitor, &monitorInfo)) {
+        workArea = monitorInfo.rcWork;
+    } else if (!GetWindowRect(hwnd_, &workArea)) {
+        return;
+    }
+
+    const int x = workArea.right - width - margin;
+    const int y = workArea.bottom - height - margin;
+    SetWindowPos(
+        menuButtonHwnd_, HWND_TOPMOST, x, y, 0, 0,
+        SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void AppMain::createDrawable() {
