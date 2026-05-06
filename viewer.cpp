@@ -63,9 +63,50 @@ std::vector<std::string> getExpressionNamesFromModelFile(const std::filesystem::
         if (!saba::ReadPMXFile(&pmx, modelPath.string().c_str()))
             return expressions;
 
+        std::vector<int> safeStates(pmx.m_morphs.size(), -1);
+        const auto isMorphSafe = [&](auto&& self, int index) -> bool {
+            if (index < 0 || index >= static_cast<int>(pmx.m_morphs.size()))
+                return false;
+
+            auto& state = safeStates[static_cast<size_t>(index)];
+            if (state == 1)
+                return true;
+            if (state == 0)
+                return false;
+
+            state = 0;
+            const auto& morph = pmx.m_morphs[static_cast<size_t>(index)];
+            switch (morph.m_morphType) {
+            case saba::PMXMorphType::Position:
+            case saba::PMXMorphType::UV:
+            case saba::PMXMorphType::AddUV1:
+            case saba::PMXMorphType::AddUV2:
+            case saba::PMXMorphType::AddUV3:
+            case saba::PMXMorphType::AddUV4:
+            case saba::PMXMorphType::Material:
+                state = 1;
+                return true;
+            case saba::PMXMorphType::Group: {
+                for (const auto& groupMorph : morph.m_groupMorph) {
+                    if (!self(self, groupMorph.m_morphIndex))
+                        return false;
+                }
+                state = 1;
+                return true;
+            }
+            case saba::PMXMorphType::Bone:
+            case saba::PMXMorphType::Flip:
+            case saba::PMXMorphType::Impluse:
+            default:
+                return false;
+            }
+        };
+
         expressions.reserve(pmx.m_morphs.size());
-        for (const auto& morph : pmx.m_morphs) {
-            if (morph.m_controlPanel >= 1 && morph.m_controlPanel <= 4) {
+        for (size_t i = 0; i < pmx.m_morphs.size(); ++i) {
+            const auto& morph = pmx.m_morphs[i];
+            if (morph.m_controlPanel >= 1 && morph.m_controlPanel <= 4 &&
+                isMorphSafe(isMorphSafe, static_cast<int>(i))) {
                 expressions.push_back(morph.m_name);
             }
         }
@@ -1552,4 +1593,6 @@ void Routine::applyExpressionMorph() {
         return;
     }
     model->UpdateMorphAnimation();
+    model->UpdateNodeAnimation(false);
+    model->UpdateNodeAnimation(true);
 }
