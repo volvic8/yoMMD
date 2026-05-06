@@ -130,7 +130,8 @@ LRESULT CALLBACK menuButtonWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARA
 AppMain::AppMain() :
     isRunning_(true),
     mouseInteractionEnabled_(true),
-    viewDirectionModeEnabled_(false),
+    viewDirectionModeXEnabled_(false),
+    viewDirectionModeYEnabled_(false),
     mouseGestureActive_(false),
     sampleCount_(Constant::PreferredSampleCount),
     hwnd_(nullptr),
@@ -202,13 +203,22 @@ bool AppMain::IsMouseInteractionEnabled() const {
     return mouseInteractionEnabled_;
 }
 
-void AppMain::SetViewDirectionModeEnabled(bool enabled) {
-    viewDirectionModeEnabled_ = enabled;
-    routine_.SetViewDirectionModeEnabled(enabled);
+void AppMain::SetViewDirectionModeXEnabled(bool enabled) {
+    viewDirectionModeXEnabled_ = enabled;
+    routine_.SetViewDirectionModeXEnabled(enabled);
 }
 
-bool AppMain::IsViewDirectionModeEnabled() const {
-    return routine_.IsViewDirectionModeEnabled();
+void AppMain::SetViewDirectionModeYEnabled(bool enabled) {
+    viewDirectionModeYEnabled_ = enabled;
+    routine_.SetViewDirectionModeYEnabled(enabled);
+}
+
+bool AppMain::IsViewDirectionModeXEnabled() const {
+    return routine_.IsViewDirectionModeXEnabled();
+}
+
+bool AppMain::IsViewDirectionModeYEnabled() const {
+    return routine_.IsViewDirectionModeYEnabled();
 }
 
 Routine& AppMain::GetRoutine() {

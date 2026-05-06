@@ -112,7 +112,7 @@ public:
     void OnGestureBegin();
     void OnGestureEnd();
     void OnMouseDragged();
-    void OnViewDragged();
+    void OnViewDragged(bool adjustYaw, bool adjustPitch);
     void OnWheelScrolled(float delta);
     void OnGestureZoom(GesturePhase phase, float delta);
     void SetDefaultTranslation(glm::vec2 pos);
@@ -192,8 +192,10 @@ public:
     void ChangeMotion(const std::vector<std::filesystem::path>& motionPaths);
     void SetModelRotation(float rotation);
     void SetModelViewDirection(float yaw, float pitch);
-    void SetViewDirectionModeEnabled(bool enabled);
-    bool IsViewDirectionModeEnabled() const;
+    void SetViewDirectionModeXEnabled(bool enabled);
+    void SetViewDirectionModeYEnabled(bool enabled);
+    bool IsViewDirectionModeXEnabled() const;
+    bool IsViewDirectionModeYEnabled() const;
     void SetModelScale(float scale);
     glm::vec2 GetModelMenuAnchorPosition(const glm::vec2& windowSize) const;
     glm::vec4 GetModelInteractionBounds(const glm::vec2& windowSize) const;
@@ -226,7 +228,8 @@ private:
     UserView userView_;
 
     bool shouldTerminate_;
-    bool viewDirectionModeEnabled_;
+    bool viewDirectionModeXEnabled_;
+    bool viewDirectionModeYEnabled_;
 
     const sg_pass_action passAction_;
     sg_shader shaderMMD_;

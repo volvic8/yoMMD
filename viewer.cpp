@@ -303,7 +303,7 @@ void UserView::OnGestureEnd() {
 
 void UserView::OnMouseDragged() {
     if (Keyboard::IsKeyPressed(Keycode::Shift)) {
-        OnViewDragged();
+        OnViewDragged(true, true);
         return;
     }
 
@@ -333,7 +333,7 @@ void UserView::OnMouseDragged() {
     transform_.translation = actionHelper_.firstTransform.translation + toVec3(delta, 0.0f);
 }
 
-void UserView::OnViewDragged() {
+void UserView::OnViewDragged(bool adjustYaw, bool adjustPitch) {
     if (actionHelper_.action != Action::ViewRotate) {
         actionHelper_ = {
             .action = Action::ViewRotate,
@@ -343,14 +343,24 @@ void UserView::OnViewDragged() {
     }
 
     constexpr float maxPitch = std::numbers::pi_v<float> * 0.49f;
+    constexpr float horizontalSensitivity = 5.0f;
     const auto delta = Context::getMousePosition() - actionHelper_.refPoint;
-    transform_.modelYaw =
-        actionHelper_.firstTransform.modelYaw +
-        delta.x / Context::getWindowSize().x * std::numbers::pi_v<float>;
-    transform_.modelPitch = std::clamp(
-        actionHelper_.firstTransform.modelPitch +
-            delta.y / Context::getWindowSize().y * std::numbers::pi_v<float>,
-        -maxPitch, maxPitch);
+    if (adjustYaw) {
+        transform_.modelYaw =
+            actionHelper_.firstTransform.modelYaw +
+            delta.x / Context::getWindowSize().x * std::numbers::pi_v<float> *
+                horizontalSensitivity;
+    } else {
+        transform_.modelYaw = actionHelper_.firstTransform.modelYaw;
+    }
+    if (adjustPitch) {
+        transform_.modelPitch = std::clamp(
+            actionHelper_.firstTransform.modelPitch +
+                -delta.y / Context::getWindowSize().y * std::numbers::pi_v<float>,
+            -maxPitch, maxPitch);
+    } else {
+        transform_.modelPitch = actionHelper_.firstTransform.modelPitch;
+    }
 }
 
 void UserView::OnWheelScrolled(float delta) {
@@ -507,7 +517,8 @@ glm::vec2 UserView::toWindowCoord(const glm::vec2& src, const glm::vec2& transla
 
 Routine::Routine() :
     shouldTerminate_(false),
-    viewDirectionModeEnabled_(false),
+    viewDirectionModeXEnabled_(false),
+    viewDirectionModeYEnabled_(false),
     passAction_(
         {.colors = {{.load_action = SG_LOADACTION_CLEAR, .clear_value = {0, 0, 0, 0}}}}),
     binds_({}),
@@ -1078,7 +1089,7 @@ void Routine::OnGestureEnd() {
 }
 
 void Routine::OnMouseDragged() {
-    if (viewDirectionModeEnabled_) {
+    if (viewDirectionModeXEnabled_ || viewDirectionModeYEnabled_) {
         OnViewDragged();
         return;
     }
@@ -1086,7 +1097,7 @@ void Routine::OnMouseDragged() {
 }
 
 void Routine::OnViewDragged() {
-    userView_.OnViewDragged();
+    userView_.OnViewDragged(viewDirectionModeXEnabled_, viewDirectionModeYEnabled_);
 }
 
 void Routine::OnWheelScrolled(float delta) {
@@ -1133,12 +1144,20 @@ void Routine::SetModelViewDirection(float yaw, float pitch) {
     userView_.SetModelDirection(yaw, pitch);
 }
 
-void Routine::SetViewDirectionModeEnabled(bool enabled) {
-    viewDirectionModeEnabled_ = enabled;
+void Routine::SetViewDirectionModeXEnabled(bool enabled) {
+    viewDirectionModeXEnabled_ = enabled;
 }
 
-bool Routine::IsViewDirectionModeEnabled() const {
-    return viewDirectionModeEnabled_;
+void Routine::SetViewDirectionModeYEnabled(bool enabled) {
+    viewDirectionModeYEnabled_ = enabled;
+}
+
+bool Routine::IsViewDirectionModeXEnabled() const {
+    return viewDirectionModeXEnabled_;
+}
+
+bool Routine::IsViewDirectionModeYEnabled() const {
+    return viewDirectionModeYEnabled_;
 }
 
 void Routine::SetModelScale(float scale) {

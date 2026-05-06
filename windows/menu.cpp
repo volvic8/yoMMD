@@ -293,9 +293,15 @@ void AppMenu::ShowMenu() {
     y += btnH + gap;
 
     makeButton(
-        getAppMain().IsViewDirectionModeEnabled() ? L"Model Rotation Mode: On"
-                                                  : L"Model Rotation Mode: Off",
-        margin, y, width - margin * 2, btnH, Enum::underlyCast(Cmd::ToggleViewDirectionMode));
+        getAppMain().IsViewDirectionModeXEnabled() ? L"Model Rotation X: On"
+                                                   : L"Model Rotation X: Off",
+        margin, y, (width - margin * 2 - gap) / 2, btnH,
+        Enum::underlyCast(Cmd::ToggleViewDirectionModeX));
+    makeButton(
+        getAppMain().IsViewDirectionModeYEnabled() ? L"Model Rotation Y: On"
+                                                   : L"Model Rotation Y: Off",
+        margin + (width - margin * 2 - gap) / 2 + gap, y, (width - margin * 2 - gap) / 2, btnH,
+        Enum::underlyCast(Cmd::ToggleViewDirectionModeY));
     y += btnH + gap;
 
     makeButton(
@@ -401,8 +407,15 @@ void AppMenu::ShowTaskbarMenu() {
         menu, MF_POPUP, reinterpret_cast<UINT_PTR>(viewDirectionMenu.GetRawHandler()),
         L"View &Direction");
     AppendMenuW(
-        menu, MF_STRING | (getAppMain().IsViewDirectionModeEnabled() ? MF_CHECKED : MF_UNCHECKED),
-        Enum::underlyCast(Cmd::ToggleViewDirectionMode), L"Model Rotation &Mode");
+        menu,
+        MF_STRING |
+            (getAppMain().IsViewDirectionModeXEnabled() ? MF_CHECKED : MF_UNCHECKED),
+        Enum::underlyCast(Cmd::ToggleViewDirectionModeX), L"Model Rotation X &Mode");
+    AppendMenuW(
+        menu,
+        MF_STRING |
+            (getAppMain().IsViewDirectionModeYEnabled() ? MF_CHECKED : MF_UNCHECKED),
+        Enum::underlyCast(Cmd::ToggleViewDirectionModeY), L"Model Rotation Y M&ode");
     AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ResetPosition), L"&Reset Position");
     AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     AppendMenuW(
@@ -503,8 +516,11 @@ void AppMenu::executeCommand(UINT_PTR op, bool closeCompactMenu) {
             parentWin, YOMMD_WM_SET_VIEW_DIRECTION,
             Cmd::GetUserData(static_cast<Cmd::UnderlyingType>(op)), 0);
         break;
-    case Cmd::ToggleViewDirectionMode:
-        getAppMain().SetViewDirectionModeEnabled(!getAppMain().IsViewDirectionModeEnabled());
+    case Cmd::ToggleViewDirectionModeX:
+        getAppMain().SetViewDirectionModeXEnabled(!getAppMain().IsViewDirectionModeXEnabled());
+        break;
+    case Cmd::ToggleViewDirectionModeY:
+        getAppMain().SetViewDirectionModeYEnabled(!getAppMain().IsViewDirectionModeYEnabled());
         break;
     case Cmd::ResetPosition:
         getAppMain().GetRoutine().ResetModelPosition();

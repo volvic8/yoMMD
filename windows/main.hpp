@@ -32,8 +32,10 @@ public:
     void ChangeScreen(int screenID);
     void SetMouseInteractionEnabled(bool enabled);
     bool IsMouseInteractionEnabled() const;
-    void SetViewDirectionModeEnabled(bool enabled);
-    bool IsViewDirectionModeEnabled() const;
+    void SetViewDirectionModeXEnabled(bool enabled);
+    void SetViewDirectionModeYEnabled(bool enabled);
+    bool IsViewDirectionModeXEnabled() const;
+    bool IsViewDirectionModeYEnabled() const;
     Routine& GetRoutine();
     const HWND& GetWindowHandle() const;
     RECT GetMenuButtonRect() const;
@@ -67,7 +69,8 @@ private:
 
     bool isRunning_;
     bool mouseInteractionEnabled_;
-    bool viewDirectionModeEnabled_;
+    bool viewDirectionModeXEnabled_;
+    bool viewDirectionModeYEnabled_;
     bool mouseGestureActive_;
     int sampleCount_;
     Routine routine_;
