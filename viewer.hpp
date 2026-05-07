@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <random>
+#include <unordered_set>
 #include "Saba/Model/MMD/MMDMaterial.h"
 #include "Saba/Model/MMD/MMDModel.h"
 #include "Saba/Model/MMD/VMDAnimation.h"
@@ -226,7 +227,7 @@ private:
     void cancelReaction(bool restoreBaseDirection);
     void triggerReaction(float yawOffset, float pitchOffset);
     void updateReaction();
-    void applyExpressionMorph();
+    void applyExpressionMorphWeights();
 
 private:
     struct Camera {
@@ -280,6 +281,8 @@ private:
     size_t motionID_;
     std::optional<size_t> defaultMotionID_;
     std::vector<std::string> availableExpressionNames_;
+    std::unordered_set<std::string> availableExpressionNameSet_;
+    std::unordered_set<std::string> expressionOverrideMorphNameSet_;
     std::optional<std::string> selectedExpressionName_;
     bool needBridgeMotions_;
     std::vector<unsigned int> motionWeights_;

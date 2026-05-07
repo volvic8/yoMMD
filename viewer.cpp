@@ -54,14 +54,19 @@ inline glm::vec3 toVec3(glm::vec2 xy, decltype(xy)::value_type z) {
     return glm::vec3(xy.x, xy.y, z);
 }
 
-std::vector<std::string> getExpressionNamesFromModelFile(const std::filesystem::path& modelPath) {
-    std::vector<std::string> expressions;
+struct ExpressionCatalog {
+    std::vector<std::string> selectableNames;
+    std::unordered_set<std::string> overrideMorphNames;
+};
+
+ExpressionCatalog getExpressionCatalogFromModelFile(const std::filesystem::path& modelPath) {
+    ExpressionCatalog catalog;
     const auto ext = modelPath.extension();
 
     if (ext == ".pmx") {
         saba::PMXFile pmx;
         if (!saba::ReadPMXFile(&pmx, modelPath.string().c_str()))
-            return expressions;
+            return catalog;
 
         std::vector<int> safeStates(pmx.m_morphs.size(), -1);
         const auto isMorphSafe = [&](auto&& self, int index) -> bool {
@@ -102,30 +107,47 @@ std::vector<std::string> getExpressionNamesFromModelFile(const std::filesystem::
             }
         };
 
-        expressions.reserve(pmx.m_morphs.size());
+        const auto collectMorphNames = [&](auto&& self, int index) -> void {
+            if (index < 0 || index >= static_cast<int>(pmx.m_morphs.size()))
+                return;
+            const auto& morph = pmx.m_morphs[static_cast<size_t>(index)];
+            catalog.overrideMorphNames.insert(morph.m_name);
+            if (morph.m_morphType != saba::PMXMorphType::Group)
+                return;
+            for (const auto& groupMorph : morph.m_groupMorph) {
+                self(self, groupMorph.m_morphIndex);
+            }
+        };
+
+        catalog.selectableNames.reserve(pmx.m_morphs.size());
         for (size_t i = 0; i < pmx.m_morphs.size(); ++i) {
             const auto& morph = pmx.m_morphs[i];
             if (morph.m_controlPanel >= 1 && morph.m_controlPanel <= 4 &&
                 isMorphSafe(isMorphSafe, static_cast<int>(i))) {
-                expressions.push_back(morph.m_name);
+                catalog.selectableNames.push_back(morph.m_name);
+                collectMorphNames(collectMorphNames, static_cast<int>(i));
             }
         }
     } else if (ext == ".pmd") {
         saba::PMDFile pmd;
         if (!saba::ReadPMDFile(&pmd, modelPath.string().c_str()))
-            return expressions;
+            return catalog;
 
-        expressions.reserve(pmd.m_morphs.size());
+        catalog.selectableNames.reserve(pmd.m_morphs.size());
         for (const auto& morph : pmd.m_morphs) {
             if (morph.m_morphType != saba::PMDMorph::Base) {
-                expressions.push_back(morph.m_morphName.ToUtf8String());
+                const auto name = morph.m_morphName.ToUtf8String();
+                catalog.selectableNames.push_back(name);
+                catalog.overrideMorphNames.insert(name);
             }
         }
     }
 
-    std::sort(expressions.begin(), expressions.end());
-    expressions.erase(std::unique(expressions.begin(), expressions.end()), expressions.end());
-    return expressions;
+    std::sort(catalog.selectableNames.begin(), catalog.selectableNames.end());
+    catalog.selectableNames.erase(
+        std::unique(catalog.selectableNames.begin(), catalog.selectableNames.end()),
+        catalog.selectableNames.end());
+    return catalog;
 }
 
 }  // namespace
@@ -652,7 +674,11 @@ void Routine::initScene() {
     defaultCamera_.eye = config_.defaultCameraPosition;
     defaultCamera_.center = config_.defaultGazePosition;
     mmd_.LoadModel(config_.model, resourcePath);
-    availableExpressionNames_ = getExpressionNamesFromModelFile(config_.model);
+    const auto expressionCatalog = getExpressionCatalogFromModelFile(config_.model);
+    availableExpressionNames_ = expressionCatalog.selectableNames;
+    availableExpressionNameSet_ = std::unordered_set<std::string>(
+        availableExpressionNames_.begin(), availableExpressionNames_.end());
+    expressionOverrideMorphNameSet_ = expressionCatalog.overrideMorphNames;
     {
         glm::vec3 modelPivot(0.0f, 0.0f, 0.0f);
         const auto model = mmd_.GetModel();
@@ -966,6 +992,7 @@ void Routine::Update() {
         model->BeginAnimation();
         if (needBridgeMotions_) {
             vmdAnim->Evaluate(0.0f, stm_sec(stm_since(timeBeginAnimation_)));
+            applyExpressionMorphWeights();
             model->UpdateMorphAnimation();
             model->UpdateNodeAnimation(false);
             model->UpdatePhysicsAnimation(elapsedTime);
@@ -975,9 +1002,13 @@ void Routine::Update() {
                 timeBeginAnimation_ = stm_now();
             }
         } else {
-            model->UpdateAllAnimation(vmdAnim.get(), vmdFrame, elapsedTime);
+            vmdAnim->Evaluate(vmdFrame);
+            applyExpressionMorphWeights();
+            model->UpdateMorphAnimation();
+            model->UpdateNodeAnimation(false);
+            model->UpdatePhysicsAnimation(elapsedTime);
+            model->UpdateNodeAnimation(true);
         }
-        applyExpressionMorph();
         model->EndAnimation();
 
         model->Update();
@@ -1013,7 +1044,10 @@ void Routine::Update() {
             glm::radians(30.0f), static_cast<float>(size.x), static_cast<float>(size.y), 1.0f,
             10000.0f);
         model->BeginAnimation();
-        applyExpressionMorph();
+        applyExpressionMorphWeights();
+        model->UpdateMorphAnimation();
+        model->UpdateNodeAnimation(false);
+        model->UpdateNodeAnimation(true);
         model->EndAnimation();
         model->Update();
         sg_update_buffer(
@@ -1174,6 +1208,8 @@ void Routine::destroyScene() {
     motionID_ = 0;
     defaultMotionID_.reset();
     availableExpressionNames_.clear();
+    availableExpressionNameSet_.clear();
+    expressionOverrideMorphNameSet_.clear();
     needBridgeMotions_ = false;
     motionWeights_.clear();
     induces_.clear();
@@ -1321,9 +1357,10 @@ void Routine::ClearExpression() {
     auto* morphManager = model->GetMorphManager();
     const auto morphCount = morphManager->GetMorphCount();
     for (size_t i = 0; i < morphCount; ++i) {
-        if (auto* morph = morphManager->GetMorph(i)) {
-            morph->SetWeight(0.0f);
-        }
+        auto* morph = morphManager->GetMorph(i);
+        if (!morph || !expressionOverrideMorphNameSet_.contains(morph->GetName()))
+            continue;
+        morph->SetWeight(0.0f);
     }
     model->UpdateMorphAnimation();
 }
@@ -1571,7 +1608,7 @@ void Routine::updateReaction() {
         reactionState_.currentPitch - reactionState_.basePitch);
 }
 
-void Routine::applyExpressionMorph() {
+void Routine::applyExpressionMorphWeights() {
     if (!selectedExpressionName_.has_value() || !mmd_.IsModelLoaded())
         return;
 
@@ -1581,7 +1618,7 @@ void Routine::applyExpressionMorph() {
     bool found = false;
     for (size_t i = 0; i < morphCount; ++i) {
         auto* morph = morphManager->GetMorph(i);
-        if (!morph)
+        if (!morph || !expressionOverrideMorphNameSet_.contains(morph->GetName()))
             continue;
         const bool isSelected = morph->GetName() == *selectedExpressionName_;
         morph->SetWeight(isSelected ? 1.0f : 0.0f);
@@ -1590,9 +1627,5 @@ void Routine::applyExpressionMorph() {
 
     if (!found) {
         selectedExpressionName_.reset();
-        return;
     }
-    model->UpdateMorphAnimation();
-    model->UpdateNodeAnimation(false);
-    model->UpdateNodeAnimation(true);
 }
