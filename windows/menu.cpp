@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cwctype>
 #include <filesystem>
 #include <memory>
 #include <string_view>
@@ -14,6 +15,8 @@ constexpr COLORREF kPanelBg = RGB(28, 31, 38);
 constexpr COLORREF kTextPrimary = RGB(242, 244, 248);
 constexpr int kScaleTrackMin = 20;
 constexpr int kScaleTrackMax = 75;
+constexpr int kSelectionFilterId = 1001;
+constexpr int kSelectionListId = 1002;
 HBRUSH getPanelBrush() {
     static HBRUSH brush = CreateSolidBrush(kPanelBg);
     return brush;
@@ -100,6 +103,13 @@ std::wstring makeMenuLabel(
 std::wstring utf8ToWide(const std::string& text) {
     return std::filesystem::path(String::tou8(text)).wstring();
 }
+
+std::wstring toLower(std::wstring text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](wchar_t ch) {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    return text;
+}
 }  // namespace
 
 AppMenu::AppMenu() :
@@ -109,6 +119,9 @@ AppMenu::AppMenu() :
     hViewDirectionModeXButton_(nullptr),
     hViewDirectionModeYButton_(nullptr),
     hReactionModeButton_(nullptr),
+    hSelectionFilterEdit_(nullptr),
+    hSelectionListBox_(nullptr),
+    hExpressionSelectionWindow_(nullptr),
     hTaskbarIcon_(nullptr),
     hMenuFont_(nullptr),
     isMenuOpened_(false) {}
@@ -139,6 +152,7 @@ void AppMenu::Setup() {
 
 void AppMenu::Terminate() {
     destroyMenuWindow();
+    destroyExpressionSelectionWindow();
 
     if (hTaskbarIcon_) {
         DestroyIcon(hTaskbarIcon_);
@@ -163,10 +177,26 @@ void AppMenu::destroyMenuWindow() {
     hViewDirectionModeXButton_ = nullptr;
     hViewDirectionModeYButton_ = nullptr;
     hReactionModeButton_ = nullptr;
-    isMenuOpened_ = false;
+    isMenuOpened_ = hExpressionSelectionWindow_ != nullptr;
+}
+
+void AppMenu::destroyExpressionSelectionWindow() {
+    if (hExpressionSelectionWindow_) {
+        DestroyWindow(hExpressionSelectionWindow_);
+        hExpressionSelectionWindow_ = nullptr;
+    }
+    hSelectionFilterEdit_ = nullptr;
+    hSelectionListBox_ = nullptr;
+    selectionFilterText_.clear();
+    filteredExpressionIndices_.clear();
+    isMenuOpened_ = hMenuWindow_ != nullptr;
 }
 
 void AppMenu::ShowMenu() {
+    if (hExpressionSelectionWindow_) {
+        destroyExpressionSelectionWindow();
+        return;
+    }
     if (hMenuWindow_) {
         destroyMenuWindow();
         return;
@@ -176,7 +206,7 @@ void AppMenu::ShowMenu() {
     const RECT buttonRect = getAppMain().GetMenuButtonRect();
     const auto& config = getAppMain().GetRoutine().GetConfig();
 
-    constexpr int width = 360;
+    const int width = 360;
     constexpr int margin = 12;
     constexpr int rowH = 18;
     constexpr int btnH = 28;
@@ -498,7 +528,10 @@ void AppMenu::handleCommand(UINT_PTR op, HWND sourceHwnd) {
         return;
     }
     if (cmd == Cmd::ChangeExpression) {
-        showSelectionMenu(sourceHwnd, SelectionMenuKind::Expression);
+        RECT anchorRect = {};
+        if (GetWindowRect(sourceHwnd, &anchorRect)) {
+            showExpressionSelectionWindow(anchorRect);
+        }
         return;
     }
     executeCommand(op, true);
@@ -634,11 +667,11 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind) {
 
     const bool isModelSelection = kind == SelectionMenuKind::Model;
     const bool isMotionSelection = kind == SelectionMenuKind::Motion;
+    if (kind == SelectionMenuKind::Expression)
+        return;
     const auto& paths =
         isModelSelection ? getAppMain().GetAvailableModels() : getAppMain().GetAvailableMotions();
-    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
-    if ((kind == SelectionMenuKind::Expression && expressions.empty()) ||
-        (kind != SelectionMenuKind::Expression && paths.empty()))
+    if (paths.empty())
         return;
 
     RECT buttonRect = {};
@@ -651,24 +684,12 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind) {
         AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
     }
 
-    if (kind == SelectionMenuKind::Expression) {
-        AppendMenuW(menu, MF_STRING, Enum::underlyCast(Cmd::ClearExpression), L"No Expression");
-        AppendMenuW(menu, MF_SEPARATOR, Enum::underlyCast(Cmd::None), L"");
-        for (size_t i = 0; i < expressions.size(); ++i) {
-            const auto label = utf8ToWide(expressions[i]);
-            AppendMenuW(
-                menu, MF_STRING,
-                Cmd::Combine(Cmd::SelectExpression, static_cast<Cmd::UnderlyingType>(i)),
-                label.c_str());
-        }
-    } else {
-        for (size_t i = 0; i < paths.size(); ++i) {
-            const auto label = toDisplayName(paths[i], 48);
-            const auto selectKind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
-            AppendMenuW(
-                menu, MF_STRING,
-                Cmd::Combine(selectKind, static_cast<Cmd::UnderlyingType>(i)), label.c_str());
-        }
+    for (size_t i = 0; i < paths.size(); ++i) {
+        const auto label = toDisplayName(paths[i], 48);
+        const auto selectKind = isModelSelection ? Cmd::SelectModel : Cmd::SelectMotion;
+        AppendMenuW(
+            menu, MF_STRING, Cmd::Combine(selectKind, static_cast<Cmd::UnderlyingType>(i)),
+            label.c_str());
     }
 
     SetForegroundWindow(hMenuWindow_);
@@ -677,6 +698,116 @@ void AppMenu::showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind) {
         buttonRect.bottom + 2, hMenuWindow_, nullptr);
     if (op != 0) {
         executeCommand(op, true);
+    }
+}
+
+void AppMenu::showExpressionSelectionWindow(const RECT& anchorRect) {
+    destroyExpressionSelectionWindow();
+
+    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
+    if (expressions.empty())
+        return;
+
+    destroyMenuWindow();
+
+    constexpr int width = 340;
+    const int height = 420;
+    constexpr int margin = 12;
+    constexpr int gap = 8;
+    constexpr int filterHeight = 28;
+    constexpr int clearButtonHeight = 26;
+
+    const HWND parentWin = getAppMain().GetWindowHandle();
+    const HMONITOR monitor =
+        MonitorFromRect(&anchorRect, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info = {.cbSize = sizeof(info)};
+    RECT workArea = anchorRect;
+    if (GetMonitorInfoW(monitor, &info)) {
+        workArea = info.rcWork;
+    }
+    RECT windowRect = makeRect(anchorRect.left, anchorRect.bottom + 4, width, height);
+    windowRect = clampRectToWorkArea(windowRect, workArea);
+
+    hExpressionSelectionWindow_ = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, wcMenuName, L"",
+        WS_POPUP | WS_BORDER, windowRect.left, windowRect.top, width, height,
+        parentWin, nullptr, GetModuleHandleW(nullptr), this);
+    if (!hExpressionSelectionWindow_) {
+        Err::Log("Failed to create expression selection window.");
+        return;
+    }
+
+    const int listTop = margin + filterHeight + gap + clearButtonHeight + gap;
+    const int listHeight = height - listTop - margin;
+
+    hSelectionFilterEdit_ = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, margin, margin, width - margin * 2,
+        filterHeight, hExpressionSelectionWindow_, reinterpret_cast<HMENU>(kSelectionFilterId),
+        GetModuleHandleW(nullptr), nullptr);
+    applyMenuFont(hSelectionFilterEdit_, hMenuFont_);
+    SendMessageW(
+        hSelectionFilterEdit_, EM_SETCUEBANNER, FALSE,
+        reinterpret_cast<LPARAM>(L"Filter expressions"));
+
+    HWND clearButton = CreateWindowExW(
+        0, L"BUTTON", L"No Expression",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_FLAT, margin,
+        margin + filterHeight + gap, width - margin * 2, clearButtonHeight,
+        hExpressionSelectionWindow_, reinterpret_cast<HMENU>(Enum::underlyCast(Cmd::ClearExpression)),
+        GetModuleHandleW(nullptr), nullptr);
+    applyMenuFont(clearButton, hMenuFont_);
+
+    hSelectionListBox_ = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"LISTBOX", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+        margin, listTop, width - margin * 2, listHeight, hExpressionSelectionWindow_,
+        reinterpret_cast<HMENU>(kSelectionListId), GetModuleHandleW(nullptr), nullptr);
+    applyMenuFont(hSelectionListBox_, hMenuFont_);
+
+    rebuildExpressionSelectionList();
+    ShowWindow(hExpressionSelectionWindow_, SW_SHOWNORMAL);
+    SetForegroundWindow(hExpressionSelectionWindow_);
+    SetFocus(hSelectionFilterEdit_);
+    isMenuOpened_ = true;
+}
+
+void AppMenu::rebuildExpressionSelectionList() {
+    if (!hSelectionListBox_)
+        return;
+
+    filteredExpressionIndices_.clear();
+    SendMessageW(hSelectionListBox_, LB_RESETCONTENT, 0, 0);
+    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
+    const auto filter = toLower(selectionFilterText_);
+    for (size_t i = 0; i < expressions.size(); ++i) {
+        const auto label = utf8ToWide(expressions[i]);
+        if (!filter.empty() && toLower(label).find(filter) == std::wstring::npos)
+            continue;
+        filteredExpressionIndices_.push_back(i);
+        SendMessageW(hSelectionListBox_, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+    }
+
+    if (!filteredExpressionIndices_.empty()) {
+        SendMessageW(hSelectionListBox_, LB_SETCURSEL, 0, 0);
+    }
+}
+
+void AppMenu::selectFilteredExpression(bool closeWindow) {
+    if (!hSelectionListBox_)
+        return;
+
+    const auto sel = static_cast<int>(SendMessageW(hSelectionListBox_, LB_GETCURSEL, 0, 0));
+    if (sel == LB_ERR || sel < 0 || static_cast<size_t>(sel) >= filteredExpressionIndices_.size())
+        return;
+
+    const auto expressions = getAppMain().GetRoutine().GetAvailableExpressions();
+    const size_t index = filteredExpressionIndices_[static_cast<size_t>(sel)];
+    if (index < expressions.size()) {
+        getAppMain().GetRoutine().SetExpression(expressions[index]);
+    }
+    if (closeWindow) {
+        destroyExpressionSelectionWindow();
     }
 }
 
@@ -739,14 +870,65 @@ LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
     }
     case WM_ACTIVATE:
         if (menu && LOWORD(wParam) == WA_INACTIVE) {
-            menu->destroyMenuWindow();
+            if (hwnd == menu->hExpressionSelectionWindow_) {
+                menu->destroyExpressionSelectionWindow();
+            } else if (hwnd == menu->hMenuWindow_) {
+                menu->destroyMenuWindow();
+            }
             return 0;
+        }
+        break;
+    case WM_KEYDOWN:
+        if (menu && hwnd == menu->hExpressionSelectionWindow_) {
+            if (wParam == VK_ESCAPE) {
+                menu->destroyExpressionSelectionWindow();
+                return 0;
+            }
+            if (wParam == VK_RETURN) {
+                menu->selectFilteredExpression(true);
+                return 0;
+            }
         }
         break;
     case WM_COMMAND:
         if (menu) {
-            menu->handleCommand(static_cast<UINT_PTR>(LOWORD(wParam)), reinterpret_cast<HWND>(lParam));
-            return 0;
+            const HWND control = reinterpret_cast<HWND>(lParam);
+            const WORD notifyCode = HIWORD(wParam);
+            const WORD controlId = LOWORD(wParam);
+            if (hwnd == menu->hExpressionSelectionWindow_) {
+                if (control == menu->hSelectionFilterEdit_ && controlId == kSelectionFilterId &&
+                    notifyCode == EN_CHANGE) {
+                    const int len = GetWindowTextLengthW(menu->hSelectionFilterEdit_);
+                    std::wstring text(static_cast<size_t>(std::max(len, 0)), L'\0');
+                    if (len > 0) {
+                        GetWindowTextW(menu->hSelectionFilterEdit_, text.data(), len + 1);
+                    }
+                    menu->selectionFilterText_ = text;
+                    menu->rebuildExpressionSelectionList();
+                    return 0;
+                }
+                if (control == menu->hSelectionListBox_ && controlId == kSelectionListId &&
+                    notifyCode == LBN_SELCHANGE) {
+                    menu->selectFilteredExpression(false);
+                    return 0;
+                }
+                if (control == menu->hSelectionListBox_ && controlId == kSelectionListId &&
+                    notifyCode == LBN_DBLCLK) {
+                    menu->selectFilteredExpression(true);
+                    return 0;
+                }
+                if (controlId == Enum::underlyCast(Cmd::ClearExpression)) {
+                    getAppMain().GetRoutine().ClearExpression();
+                    menu->destroyExpressionSelectionWindow();
+                    return 0;
+                }
+                return 0;
+            }
+            if (hwnd == menu->hMenuWindow_) {
+                menu->handleCommand(
+                    static_cast<UINT_PTR>(LOWORD(wParam)), reinterpret_cast<HWND>(lParam));
+                return 0;
+            }
         }
         break;
     case WM_HSCROLL:
@@ -759,7 +941,20 @@ LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         }
         break;
     case WM_MOUSEWHEEL:
-        if (menu && menu->hScaleTrackbar_) {
+        if (menu && hwnd == menu->hExpressionSelectionWindow_ && menu->hSelectionListBox_) {
+            POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            RECT listRect = {};
+            GetWindowRect(menu->hSelectionListBox_, &listRect);
+            RECT filterRect = {};
+            GetWindowRect(menu->hSelectionFilterEdit_, &filterRect);
+            RECT windowRect = {};
+            GetWindowRect(menu->hExpressionSelectionWindow_, &windowRect);
+            if (PtInRect(&listRect, pt) || PtInRect(&filterRect, pt) || PtInRect(&windowRect, pt)) {
+                SendMessageW(menu->hSelectionListBox_, uMsg, wParam, lParam);
+                return 0;
+            }
+        }
+        if (menu && hwnd == menu->hMenuWindow_ && menu->hScaleTrackbar_) {
             POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             RECT trackRect = {};
             GetWindowRect(menu->hScaleTrackbar_, &trackRect);
@@ -777,7 +972,11 @@ LRESULT CALLBACK AppMenu::windowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM
         break;
     case WM_CLOSE:
         if (menu) {
-            menu->destroyMenuWindow();
+            if (hwnd == menu->hExpressionSelectionWindow_) {
+                menu->destroyExpressionSelectionWindow();
+            } else if (hwnd == menu->hMenuWindow_) {
+                menu->destroyMenuWindow();
+            }
             return 0;
         }
         break;

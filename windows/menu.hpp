@@ -4,7 +4,9 @@
 #include "winver.hpp"
 #include <windows.h>
 #include <windowsx.h>
+#include <string>
 #include <type_traits>
+#include <vector>
 #include "../util.hpp"
 
 class AppMenu {
@@ -39,6 +41,10 @@ private:
     void handleCommand(UINT_PTR cmd, HWND sourceHwnd);
     void executeCommand(UINT_PTR cmd, bool closeCompactMenu);
     void showSelectionMenu(HWND sourceHwnd, SelectionMenuKind kind);
+    void showExpressionSelectionWindow(const RECT& anchorRect);
+    void destroyExpressionSelectionWindow();
+    void rebuildExpressionSelectionList();
+    void selectFilteredExpression(bool closeWindow);
     void updateScaleControls();
     void updateViewDirectionModeButtons();
     void updateReactionModeButton();
@@ -112,10 +118,15 @@ private:
     HWND hViewDirectionModeXButton_;
     HWND hViewDirectionModeYButton_;
     HWND hReactionModeButton_;
+    HWND hSelectionFilterEdit_;
+    HWND hSelectionListBox_;
+    HWND hExpressionSelectionWindow_;
     HICON hTaskbarIcon_;
     HFONT hMenuFont_;
     NOTIFYICONDATAW taskbarIconDesc_;
     bool isMenuOpened_;
+    std::wstring selectionFilterText_;
+    std::vector<size_t> filteredExpressionIndices_;
 };
 
 #endif  // WINDOWS_MENU_HPP_
