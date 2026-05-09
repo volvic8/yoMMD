@@ -8,6 +8,7 @@
 #include <numeric>
 #include <optional>
 #include <random>
+#include <array>
 #include <string>
 #include <string_view>
 #include "Saba/Model/MMD/MMDCamera.h"
@@ -23,6 +24,7 @@
 #include "Saba/Model/MMD/VMDFile.h"
 #include "btBulletDynamicsCommon.h"  // IWYU pragma: keep; supress warning from clangd.
 #include "constant.hpp"
+#include "glm/gtc/quaternion.hpp"
 #include "keyboard.hpp"
 #include "platform.hpp"
 #include "platform_api.hpp"
@@ -52,6 +54,18 @@ inline glm::vec2 toVec2(glm::vec3 v) {
 
 inline glm::vec3 toVec3(glm::vec2 xy, decltype(xy)::value_type z) {
     return glm::vec3(xy.x, xy.y, z);
+}
+
+template <size_t N>
+saba::MMDNode* findFirstNode(
+    saba::MMDNodeManager* nodeManager, const std::array<const char*, N>& names) {
+    if (!nodeManager)
+        return nullptr;
+    for (const auto* name : names) {
+        if (auto* node = nodeManager->GetMMDNode(name))
+            return node;
+    }
+    return nullptr;
 }
 
 struct ExpressionCatalog {
@@ -745,6 +759,7 @@ void Routine::initScene() {
     physics->SetMaxSubStepCount(INT_MAX);
     physics->SetFPS(config_.simulationFPS);
     updateGravity();
+    resolveLookAtBoneTargets();
 
     userView_.SetDefaultTranslation(config_.defaultModelPosition);
     userView_.SetDefaultScaling(config_.defaultScale);
@@ -994,6 +1009,7 @@ void Routine::Update() {
             vmdAnim->Evaluate(0.0f, stm_sec(stm_since(timeBeginAnimation_)));
             applyExpressionMorphWeights();
             model->UpdateMorphAnimation();
+            applyLookAtBoneRotations(false);
             model->UpdateNodeAnimation(false);
             model->UpdatePhysicsAnimation(elapsedTime);
             model->UpdateNodeAnimation(true);
@@ -1005,6 +1021,7 @@ void Routine::Update() {
             vmdAnim->Evaluate(vmdFrame);
             applyExpressionMorphWeights();
             model->UpdateMorphAnimation();
+            applyLookAtBoneRotations(false);
             model->UpdateNodeAnimation(false);
             model->UpdatePhysicsAnimation(elapsedTime);
             model->UpdateNodeAnimation(true);
@@ -1046,6 +1063,7 @@ void Routine::Update() {
         model->BeginAnimation();
         applyExpressionMorphWeights();
         model->UpdateMorphAnimation();
+        applyLookAtBoneRotations(true);
         model->UpdateNodeAnimation(false);
         model->UpdateNodeAnimation(true);
         model->EndAnimation();
@@ -1216,6 +1234,7 @@ void Routine::destroyScene() {
     texImages_.clear();
     textures_.clear();
     materials_.clear();
+    lookAtBoneTargets_ = {};
     mmd_.Reset();
 
     if (posVB_.id != SG_INVALID_ID) {
@@ -1539,11 +1558,70 @@ void Routine::updateGravity() {
     mmd_.GetModel()->GetMMDPhysics()->GetDynamicsWorld()->setGravity(gravity);
 }
 
+void Routine::resolveLookAtBoneTargets() {
+    lookAtBoneTargets_ = {};
+    if (!mmd_.IsModelLoaded())
+        return;
+
+    auto* nodeManager = mmd_.GetModel()->GetNodeManager();
+    if (!nodeManager)
+        return;
+
+    for (const auto* name : {"上半身", "上半身1", "上半身2", "上半身3"}) {
+        if (auto* node = nodeManager->GetMMDNode(name))
+            lookAtBoneTargets_.upperBodyNodes.push_back(node);
+    }
+    lookAtBoneTargets_.neck = findFirstNode(nodeManager, std::array{"首"});
+    lookAtBoneTargets_.head = findFirstNode(nodeManager, std::array{"頭"});
+    lookAtBoneTargets_.bothEyes = findFirstNode(nodeManager, std::array{"両目"});
+    lookAtBoneTargets_.leftEye = findFirstNode(nodeManager, std::array{"左目"});
+    lookAtBoneTargets_.rightEye = findFirstNode(nodeManager, std::array{"右目"});
+}
+
+void Routine::applyLookAtBoneRotations(bool useBaseAnimation) {
+    if (!lookAtBoneTargets_.HasAny())
+        return;
+    if (!reactionModeEnabled_ || reactionModeSuspended_)
+        return;
+    if (viewDirectionModeXEnabled_ || viewDirectionModeYEnabled_)
+        return;
+
+    const float yawOffset = reactionState_.currentYaw - reactionState_.baseYaw;
+    const float pitchOffset = reactionState_.currentPitch - reactionState_.basePitch;
+    if (std::abs(yawOffset) < 0.0001f && std::abs(pitchOffset) < 0.0001f)
+        return;
+
+    const auto applyToNode = [yawOffset, pitchOffset, useBaseAnimation](
+                                 saba::MMDNode* node, float yawWeight, float pitchWeight) {
+        if (!node)
+            return;
+        const auto extra = glm::angleAxis(yawOffset * yawWeight, glm::vec3(0.0f, 1.0f, 0.0f)) *
+            glm::angleAxis(pitchOffset * pitchWeight, glm::vec3(1.0f, 0.0f, 0.0f));
+        const auto baseRotation =
+            useBaseAnimation ? node->GetBaseAnimationRotate() : node->GetAnimationRotate();
+        node->SetAnimationRotate(baseRotation * extra);
+    };
+
+    for (size_t i = 0; i < lookAtBoneTargets_.upperBodyNodes.size(); ++i) {
+        const float yawWeight = i == 0 ? 0.18f : (i == 1 ? 0.16f : 0.12f);
+        const float pitchWeight = i == 0 ? 0.10f : (i == 1 ? 0.14f : 0.12f);
+        applyToNode(lookAtBoneTargets_.upperBodyNodes[i], yawWeight, pitchWeight);
+    }
+    applyToNode(lookAtBoneTargets_.neck, 0.26f, 0.28f);
+    applyToNode(lookAtBoneTargets_.head, 0.34f, 0.34f);
+    if (lookAtBoneTargets_.bothEyes) {
+        applyToNode(lookAtBoneTargets_.bothEyes, 0.48f, 0.42f);
+    } else {
+        applyToNode(lookAtBoneTargets_.leftEye, 0.40f, 0.36f);
+        applyToNode(lookAtBoneTargets_.rightEye, 0.40f, 0.36f);
+    }
+}
+
 void Routine::cancelReaction(bool restoreBaseDirection) {
     if (!reactionState_.active)
         return;
 
-    if (restoreBaseDirection) {
+    if (restoreBaseDirection && !lookAtBoneTargets_.HasAny()) {
         const auto state = userView_.GetState();
         userView_.RestoreState(UserView::State{
             .rotation = state.rotation,
@@ -1557,17 +1635,19 @@ void Routine::cancelReaction(bool restoreBaseDirection) {
 }
 
 void Routine::triggerReaction(float yawOffset, float pitchOffset) {
-    const auto state = userView_.GetState();
     reactionState_.active = true;
     reactionState_.currentYaw = reactionState_.baseYaw + yawOffset;
     reactionState_.currentPitch = reactionState_.basePitch + pitchOffset;
-    userView_.RestoreState(UserView::State{
-        .rotation = state.rotation,
-        .modelYaw = reactionState_.currentYaw,
-        .modelPitch = reactionState_.currentPitch,
-        .scale = state.scale,
-        .translation = state.translation,
-    });
+    if (!lookAtBoneTargets_.HasAny()) {
+        const auto state = userView_.GetState();
+        userView_.RestoreState(UserView::State{
+            .rotation = state.rotation,
+            .modelYaw = reactionState_.currentYaw,
+            .modelPitch = reactionState_.currentPitch,
+            .scale = state.scale,
+            .translation = state.translation,
+        });
+    }
 }
 
 void Routine::updateReaction() {

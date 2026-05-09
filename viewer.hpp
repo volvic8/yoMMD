@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include "Saba/Model/MMD/MMDMaterial.h"
 #include "Saba/Model/MMD/MMDModel.h"
+#include "Saba/Model/MMD/MMDNode.h"
 #include "Saba/Model/MMD/VMDAnimation.h"
 #include "Saba/Model/MMD/VMDCameraAnimation.h"
 #include "config.hpp"
@@ -224,6 +225,8 @@ private:
     std::optional<ImageMap::const_iterator> loadImage(const std::string& path);
     std::optional<SgImageView> getTexture(const std::string& path);
     void updateGravity();
+    void resolveLookAtBoneTargets();
+    void applyLookAtBoneRotations(bool useBaseAnimation);
     void cancelReaction(bool restoreBaseDirection);
     void triggerReaction(float yawOffset, float pitchOffset);
     void updateReaction();
@@ -289,6 +292,19 @@ private:
 
     std::mt19937 rand_;
     std::uniform_int_distribution<size_t> randDist_;
+
+    struct LookAtBoneTargets {
+        std::vector<saba::MMDNode*> upperBodyNodes;
+        saba::MMDNode* neck = nullptr;
+        saba::MMDNode* head = nullptr;
+        saba::MMDNode* bothEyes = nullptr;
+        saba::MMDNode* leftEye = nullptr;
+        saba::MMDNode* rightEye = nullptr;
+
+        bool HasAny() const {
+            return !upperBodyNodes.empty() || neck || head || bothEyes || leftEye || rightEye;
+        }
+    } lookAtBoneTargets_;
 
     struct ReactionState {
         bool active = false;
