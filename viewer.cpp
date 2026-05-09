@@ -651,7 +651,7 @@ glm::vec2 UserView::toWindowCoord(const glm::vec2& src, const glm::vec2& transla
 
 Routine::Routine() :
     shouldTerminate_(false),
-    reactionModeEnabled_(false),
+    reactionModeEnabled_(true),
     reactionModeSuspended_(false),
     viewDirectionModeXEnabled_(false),
     viewDirectionModeYEnabled_(false),
@@ -692,6 +692,7 @@ void Routine::Init() {
     }
 
     initScene();
+    SetReactionModeEnabled(reactionModeEnabled_);
     shouldTerminate_ = true;
 }
 
