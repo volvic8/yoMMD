@@ -312,6 +312,8 @@ private:
         float basePitch = 0.0f;
         float currentYaw = 0.0f;
         float currentPitch = 0.0f;
+        float currentBodyYaw = 0.0f;
+        float bodyTurnElapsed = 0.0f;
     } reactionState_;
 };
 

@@ -1292,6 +1292,8 @@ void Routine::OnGestureEnd() {
         reactionState_.basePitch = state.modelPitch;
         reactionState_.currentYaw = state.modelYaw;
         reactionState_.currentPitch = state.modelPitch;
+        reactionState_.currentBodyYaw = state.modelYaw;
+        reactionState_.bodyTurnElapsed = 0.0f;
         reactionState_.active = true;
         reactionModeSuspended_ = false;
     }
@@ -1399,6 +1401,8 @@ void Routine::SetModelViewDirection(float yaw, float pitch) {
         reactionState_.basePitch = pitch;
         reactionState_.currentYaw = yaw;
         reactionState_.currentPitch = pitch;
+        reactionState_.currentBodyYaw = yaw;
+        reactionState_.bodyTurnElapsed = 0.0f;
         reactionState_.active = true;
         userView_.RestoreState(UserView::State{
             .rotation = state.rotation,
@@ -1421,6 +1425,8 @@ void Routine::SetReactionModeEnabled(bool enabled) {
         reactionState_.basePitch = state.modelPitch;
         reactionState_.currentYaw = state.modelYaw;
         reactionState_.currentPitch = state.modelPitch;
+        reactionState_.currentBodyYaw = state.modelYaw;
+        reactionState_.bodyTurnElapsed = 0.0f;
         reactionModeSuspended_ = false;
     } else {
         reactionModeSuspended_ = false;
@@ -1586,7 +1592,7 @@ void Routine::applyLookAtBoneRotations(bool useBaseAnimation) {
     if (viewDirectionModeXEnabled_ || viewDirectionModeYEnabled_)
         return;
 
-    const float yawOffset = reactionState_.currentYaw - reactionState_.baseYaw;
+    const float yawOffset = reactionState_.currentYaw - reactionState_.currentBodyYaw;
     const float pitchOffset = reactionState_.currentPitch - reactionState_.basePitch;
     if (std::abs(yawOffset) < 0.0001f && std::abs(pitchOffset) < 0.0001f)
         return;
@@ -1610,10 +1616,10 @@ void Routine::applyLookAtBoneRotations(bool useBaseAnimation) {
     applyToNode(lookAtBoneTargets_.neck, 0.26f, 0.28f);
     applyToNode(lookAtBoneTargets_.head, 0.34f, 0.34f);
     if (lookAtBoneTargets_.bothEyes) {
-        applyToNode(lookAtBoneTargets_.bothEyes, 0.48f, 0.42f);
+        applyToNode(lookAtBoneTargets_.bothEyes, 0.24f, 0.18f);
     } else {
-        applyToNode(lookAtBoneTargets_.leftEye, 0.40f, 0.36f);
-        applyToNode(lookAtBoneTargets_.rightEye, 0.40f, 0.36f);
+        applyToNode(lookAtBoneTargets_.leftEye, 0.20f, 0.16f);
+        applyToNode(lookAtBoneTargets_.rightEye, 0.20f, 0.16f);
     }
 }
 
@@ -1621,7 +1627,7 @@ void Routine::cancelReaction(bool restoreBaseDirection) {
     if (!reactionState_.active)
         return;
 
-    if (restoreBaseDirection && !lookAtBoneTargets_.HasAny()) {
+    if (restoreBaseDirection) {
         const auto state = userView_.GetState();
         userView_.RestoreState(UserView::State{
             .rotation = state.rotation,
@@ -1638,12 +1644,20 @@ void Routine::triggerReaction(float yawOffset, float pitchOffset) {
     reactionState_.active = true;
     reactionState_.currentYaw = reactionState_.baseYaw + yawOffset;
     reactionState_.currentPitch = reactionState_.basePitch + pitchOffset;
+    const auto state = userView_.GetState();
     if (!lookAtBoneTargets_.HasAny()) {
-        const auto state = userView_.GetState();
         userView_.RestoreState(UserView::State{
             .rotation = state.rotation,
             .modelYaw = reactionState_.currentYaw,
             .modelPitch = reactionState_.currentPitch,
+            .scale = state.scale,
+            .translation = state.translation,
+        });
+    } else {
+        userView_.RestoreState(UserView::State{
+            .rotation = state.rotation,
+            .modelYaw = reactionState_.currentBodyYaw,
+            .modelPitch = reactionState_.basePitch,
             .scale = state.scale,
             .translation = state.translation,
         });
@@ -1667,9 +1681,11 @@ void Routine::updateReaction() {
     const float normalizedX = std::clamp((point.x - centerX) / halfWidth, -1.0f, 1.0f);
     const float normalizedY = std::clamp((point.y - centerY) / halfHeight, -1.0f, 1.0f);
 
-    constexpr float maxYawOffset = std::numbers::pi_v<float> * 0.13f;
+    constexpr float maxYawOffset = std::numbers::pi_v<float> * 0.25f;
     constexpr float maxPitchOffsetDown = std::numbers::pi_v<float> * 0.12f;
     constexpr float maxPitchOffsetUp = std::numbers::pi_v<float> * 0.18f;
+    constexpr float bodyTurnStartSeconds = 3.0f;
+    constexpr float bodyTurnActivationThreshold = 0.35f;
     const float maxPitchOffset = normalizedY >= 0.0f ? maxPitchOffsetUp : maxPitchOffsetDown;
     const float targetYaw = reactionState_.baseYaw + normalizedX * maxYawOffset;
     const float targetPitch = reactionState_.basePitch - normalizedY * maxPitchOffset;
@@ -1680,9 +1696,24 @@ void Routine::updateReaction() {
         reactionState_.active = true;
         reactionState_.currentYaw = reactionState_.baseYaw;
         reactionState_.currentPitch = reactionState_.basePitch;
+        reactionState_.currentBodyYaw = reactionState_.baseYaw;
+        reactionState_.bodyTurnElapsed = 0.0f;
     }
     reactionState_.currentYaw += (targetYaw - reactionState_.currentYaw) * blend;
     reactionState_.currentPitch += (targetPitch - reactionState_.currentPitch) * blend;
+    if (std::abs(normalizedX) >= bodyTurnActivationThreshold) {
+        reactionState_.bodyTurnElapsed += elapsed;
+    } else {
+        reactionState_.bodyTurnElapsed = 0.0f;
+    }
+
+    float bodyTargetYaw = reactionState_.baseYaw;
+    if (reactionState_.bodyTurnElapsed >= bodyTurnStartSeconds) {
+        bodyTargetYaw = reactionState_.currentYaw;
+    }
+    const float bodyBlend = std::clamp(elapsed * 2.5f, 0.0f, 1.0f);
+    reactionState_.currentBodyYaw +=
+        (bodyTargetYaw - reactionState_.currentBodyYaw) * bodyBlend;
     triggerReaction(
         reactionState_.currentYaw - reactionState_.baseYaw,
         reactionState_.currentPitch - reactionState_.basePitch);
