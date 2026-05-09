@@ -1,0 +1,7 @@
+﻿model = "../input/model/HakosBaelz/HakosBaelz/PMX/HakosBaelz.pmx"
+default-model-position = [0.90, -0.68]
+default-camera-position = [0.0, 20.0, 50.0]
+default-scale = 0.38
+
+[[motion]]
+path = ["../input/motion/ぼんやり待ち合わせ(465f).vmd"]

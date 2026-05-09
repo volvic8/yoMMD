@@ -1,5 +1,6 @@
 !.gitignore
 config.toml
+!release/config.toml
 yommd
 yommd.exe
 build/
