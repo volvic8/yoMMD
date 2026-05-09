@@ -24,7 +24,7 @@ Config::Config() :
     defaultScale(0.38f),
     defaultCameraPosition(0, 10, 50),
     defaultGazePosition(0, 10, 0),
-    defaultScreenNumber(std::nullopt) {}
+    defaultScreenNumber(0) {}
 
 Config Config::Parse(const std::filesystem::path& configFile) {
     namespace fs = std::filesystem;
