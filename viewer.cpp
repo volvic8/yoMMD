@@ -56,6 +56,20 @@ inline glm::vec3 toVec3(glm::vec2 xy, decltype(xy)::value_type z) {
     return glm::vec3(xy.x, xy.y, z);
 }
 
+float normalizeAngle(float angle) {
+    const float fullTurn = std::numbers::pi_v<float> * 2.0f;
+    while (angle > std::numbers::pi_v<float>)
+        angle -= fullTurn;
+    while (angle < -std::numbers::pi_v<float>)
+        angle += fullTurn;
+    return angle;
+}
+
+float smoothStep01(float value) {
+    value = std::clamp(value, 0.0f, 1.0f);
+    return value * value * (3.0f - 2.0f * value);
+}
+
 template <size_t N>
 saba::MMDNode* findFirstNode(
     saba::MMDNodeManager* nodeManager, const std::array<const char*, N>& names) {
@@ -1294,6 +1308,7 @@ void Routine::OnGestureEnd() {
         reactionState_.currentPitch = state.modelPitch;
         reactionState_.currentBodyYaw = state.modelYaw;
         reactionState_.bodyTurnElapsed = 0.0f;
+        reactionState_.bodyTurnBlend = 0.0f;
         reactionState_.active = true;
         reactionModeSuspended_ = false;
     }
@@ -1403,6 +1418,7 @@ void Routine::SetModelViewDirection(float yaw, float pitch) {
         reactionState_.currentPitch = pitch;
         reactionState_.currentBodyYaw = yaw;
         reactionState_.bodyTurnElapsed = 0.0f;
+        reactionState_.bodyTurnBlend = 0.0f;
         reactionState_.active = true;
         userView_.RestoreState(UserView::State{
             .rotation = state.rotation,
@@ -1427,6 +1443,7 @@ void Routine::SetReactionModeEnabled(bool enabled) {
         reactionState_.currentPitch = state.modelPitch;
         reactionState_.currentBodyYaw = state.modelYaw;
         reactionState_.bodyTurnElapsed = 0.0f;
+        reactionState_.bodyTurnBlend = 0.0f;
         reactionModeSuspended_ = false;
     } else {
         reactionModeSuspended_ = false;
@@ -1698,6 +1715,7 @@ void Routine::updateReaction() {
         reactionState_.currentPitch = reactionState_.basePitch;
         reactionState_.currentBodyYaw = reactionState_.baseYaw;
         reactionState_.bodyTurnElapsed = 0.0f;
+        reactionState_.bodyTurnBlend = 0.0f;
     }
     reactionState_.currentYaw += (targetYaw - reactionState_.currentYaw) * blend;
     reactionState_.currentPitch += (targetPitch - reactionState_.currentPitch) * blend;
@@ -1707,13 +1725,20 @@ void Routine::updateReaction() {
         reactionState_.bodyTurnElapsed = 0.0f;
     }
 
-    float bodyTargetYaw = reactionState_.baseYaw;
     if (reactionState_.bodyTurnElapsed >= bodyTurnStartSeconds) {
-        bodyTargetYaw = reactionState_.currentYaw;
+        reactionState_.bodyTurnBlend =
+            std::min(reactionState_.bodyTurnBlend + elapsed / 1.1f, 1.0f);
+    } else {
+        reactionState_.bodyTurnBlend =
+            std::max(reactionState_.bodyTurnBlend - elapsed / 0.8f, 0.0f);
     }
-    const float bodyBlend = std::clamp(elapsed * 2.5f, 0.0f, 1.0f);
+
+    const float easedBodyTurnBlend = smoothStep01(reactionState_.bodyTurnBlend);
+    const float yawDelta = normalizeAngle(reactionState_.currentYaw - reactionState_.baseYaw);
+    const float bodyTargetYaw = reactionState_.baseYaw + yawDelta * easedBodyTurnBlend;
+    const float bodyBlend = std::clamp(elapsed * 3.0f, 0.0f, 1.0f);
     reactionState_.currentBodyYaw +=
-        (bodyTargetYaw - reactionState_.currentBodyYaw) * bodyBlend;
+        normalizeAngle(bodyTargetYaw - reactionState_.currentBodyYaw) * bodyBlend;
     triggerReaction(
         reactionState_.currentYaw - reactionState_.baseYaw,
         reactionState_.currentPitch - reactionState_.basePitch);
